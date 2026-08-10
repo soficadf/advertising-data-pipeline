@@ -12,6 +12,7 @@ from pyspark.sql.functions import (
     to_timestamp
 )
 from pyspark.sql.types import StructType
+from pyspark.sql import SparkSession
 
 from config.settings import  get_spark_session
 from schemas.meta import get_meta_schema
