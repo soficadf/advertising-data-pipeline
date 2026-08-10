@@ -1,72 +1,168 @@
+
 import json
-import os
 import logging
+import os
+import re
 from datetime import datetime, timezone
-from azure.eventhub import EventHubConsumerClient, TransportType
+
 from config.adls_client import upload_to_adls
+from config.settings import get_secret
+from schemas.ventas import get_ventas_schema
+
+
+# ─────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
-buffer = []
+
+# ─────────────────────────────────────────
+# CONFIGURACIÓN
+# ─────────────────────────────────────────
+
 BUFFER_SIZE = 10
 
 
-def get_credentials() -> tuple:
-    """Lee las credenciales del entorno disponible."""
-    if os.getenv("ENV", "prod") == "local":
-        from dotenv import load_dotenv
-        load_dotenv()
-        connection_string = os.getenv("EVENT_HUBS_CONNECTION_STRING")
-        eventhub_name = os.getenv("EVENT_HUBS_NAME")
-        logger.info("Credenciales leídas desde .env")
-    else:
-        connection_string = dbutils.secrets.get(scope="ad-pipeline", key="event_hubs_connection_string")
-        eventhub_name = dbutils.secrets.get(scope="ad-pipeline", key="event_hubs_name")
-        logger.info("Credenciales leídas desde Databricks Secrets")
+# ─────────────────────────────────────────
+# CREDENCIALES
+# ─────────────────────────────────────────
 
-    if not connection_string or not eventhub_name:
-        raise ValueError("Credenciales de Event Hubs no encontradas")
+def get_eventhubs_credentials() -> tuple[str, str]:
+    """
+    Obtiene las credenciales de Azure Event Hubs.
+
+    Local:
+        EVENT_HUBS_CONNECTION_STRING y EVENT_HUBS_NAME
+        desde .env.
+
+    Databricks:
+        event_hubs_connection_string y event_hubs_name
+        desde Databricks Secrets.
+    """
+
+    connection_string = get_secret(
+        local_key="EVENT_HUBS_CONNECTION_STRING",
+        databricks_key="event_hubs_connection_string"
+    )
+
+    eventhub_name = get_secret(
+        local_key="EVENT_HUBS_NAME",
+        databricks_key="event_hubs_name"
+    )
 
     return connection_string, eventhub_name
 
 
 # ─────────────────────────────────────────
-# MODO LOCAL — EventHubConsumerClient
+# PARSEAR CONNECTION STRING
+# ─────────────────────────────────────────
+
+def parse_eventhubs_connection_string(
+    connection_string: str
+) -> tuple[str, str | None]:
+    """
+    Extrae el namespace y el Event Hub de la
+    connection string de Azure Event Hubs.
+
+    Ejemplo:
+
+        Endpoint=sb://namespace.servicebus.windows.net/;
+        SharedAccessKeyName=...;
+        SharedAccessKey=...;
+        EntityPath=sales-events
+    """
+
+    endpoint_match = re.search(
+        r"Endpoint=sb://([^/]+)",
+        connection_string
+    )
+
+    if not endpoint_match:
+        raise ValueError(
+            "No se pudo obtener el namespace "
+            "de la connection string de Event Hubs."
+        )
+
+    namespace = endpoint_match.group(1)
+
+    entity_path_match = re.search(
+        r"(?:^|;)EntityPath=([^;]+)",
+        connection_string
+    )
+
+    eventhub_name = (
+        entity_path_match.group(1)
+        if entity_path_match
+        else None
+    )
+
+    return namespace, eventhub_name
+
+
+# ─────────────────────────────────────────
+# MODO LOCAL — EVENT HUBS SDK
 # ─────────────────────────────────────────
 
 def on_event(partition_context, event):
-    """Callback que se ejecuta cada vez que llega un evento de Event Hubs."""
-    global buffer
+    """
+    Callback ejecutado cada vez que llega un evento
+    de Event Hubs en modo local.
+    """
 
-    data = json.loads(event.body_as_str())
+    data = json.loads(
+        event.body_as_str()
+    )
+
     buffer.append(data)
-    logger.info(f"Evento recibido: {data['product_name']} - {data['total_amount']}€")
+
+    logger.info(
+        "Evento recibido: %s - %s€",
+        data.get("product_name"),
+        data.get("total_amount")
+    )
 
     if len(buffer) >= BUFFER_SIZE:
+
         flush_buffer()
-        partition_context.update_checkpoint(event)
+
+        partition_context.update_checkpoint(
+            event
+        )
 
 
 def flush_buffer():
-    """Escribe el buffer acumulado en la capa landing del Data Lake."""
+    """
+    Escribe el buffer acumulado en la capa
+    landing del Data Lake.
+    """
+
     global buffer
 
     if not buffer:
         return
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S%f")
-    filename = f"ventas_{timestamp}.json"
+    now = datetime.now(timezone.utc)
 
-    content = json.dumps({
-        "batch_date": datetime.now(timezone.utc).date().isoformat(),
-        "batch_timestamp": datetime.now(timezone.utc).isoformat(),
-        "total_events": len(buffer),
-        "events": buffer
-    }, ensure_ascii=False, indent=2)
+    filename = (
+        f"ventas_{now.strftime('%Y%m%d_%H%M%S%f')}.json"
+    )
+
+    content = json.dumps(
+        {
+            "batch_date": now.date().isoformat(),
+            "batch_timestamp": now.isoformat(),
+            "total_events": len(buffer),
+            "events": buffer
+        },
+        ensure_ascii=False,
+        indent=2
+    )
 
     upload_to_adls(
         content=content,
@@ -75,15 +171,31 @@ def flush_buffer():
         filename=filename
     )
 
-    logger.info(f"Buffer de {len(buffer)} eventos escrito en landing/ventas/")
+    logger.info(
+        "Buffer de %s eventos escrito en landing/ventas/",
+        len(buffer)
+    )
+
     buffer = []
 
 
-def start_consumer_local(connection_string: str, eventhub_name: str):
+def start_consumer_local(
+    connection_string: str,
+    eventhub_name: str
+):
     """
-    Inicia el consumidor en modo local usando EventHubConsumerClient.
-    Útil para desarrollo y pruebas desde la máquina local.
+    Inicia el consumidor en modo local utilizando
+    EventHubConsumerClient.
+
+    Este consumidor se utiliza únicamente para
+    desarrollo y pruebas locales.
     """
+
+    from azure.eventhub import (
+        EventHubConsumerClient,
+        TransportType
+    )
+
     client = EventHubConsumerClient.from_connection_string(
         conn_str=connection_string,
         consumer_group="$Default",
@@ -92,82 +204,211 @@ def start_consumer_local(connection_string: str, eventhub_name: str):
         transport_type=TransportType.AmqpOverWebsocket
     )
 
-    logger.info("Consumer local iniciado, esperando eventos...")
+    logger.info(
+        "Consumer local iniciado. "
+        "Esperando eventos..."
+    )
 
     try:
+
         with client:
+
             client.receive(
                 on_event=on_event,
                 starting_position="-1"
             )
+
     except KeyboardInterrupt:
+
         flush_buffer()
-        logger.info("Consumer detenido manualmente.")
+
+        logger.info(
+            "Consumer detenido manualmente."
+        )
 
 
 # ─────────────────────────────────────────
-# MODO PROD — Databricks Structured Streaming
+# KAFKA → EVENT HUBS
 # ─────────────────────────────────────────
 
-def get_ventas_schema():
-    """Schema de los eventos de ventas."""
-    from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType
-    return StructType([
-        StructField("event_id", StringType()),
-        StructField("timestamp", StringType()),
-        StructField("product_id", StringType()),
-        StructField("product_name", StringType()),
-        StructField("quantity", LongType()),
-        StructField("unit_price", DoubleType()),
-        StructField("total_amount", DoubleType()),
-        StructField("region", StringType()),
-        StructField("channel", StringType())
-    ])
-
-
-def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: str):
+def get_eventhubs_kafka_config(
+    connection_string: str,
+    eventhub_name: str
+) -> dict:
     """
-    Inicia el consumidor en modo producción usando Databricks Structured Streaming.
-    Lee de Event Hubs y escribe directamente en landing/ventas/ en el Data Lake.
+    Genera la configuración Kafka necesaria
+    para conectarse a Azure Event Hubs.
+
+    Event Hubs expone un endpoint compatible
+    con Kafka en el puerto 9093.
     """
-    from pyspark.sql import SparkSession
-    from pyspark.sql.functions import from_json, col, lit, current_date, current_timestamp
 
-    spark = SparkSession.builder.getOrCreate()
-
-    # Configura la conexión a Event Hubs
-    eh_conf = {
-        "eventhubs.connectionString": spark._jvm.org.apache.spark.eventhubs \
-            .EventHubsUtils.encrypt(connection_string),
-        "eventhubs.consumerGroup": "$Default"
-    }
-
-    # Lee el stream de Event Hubs
-    df_stream = spark.readStream \
-        .format("eventhubs") \
-        .options(**eh_conf) \
-        .load()
-
-    # Parsea el body del evento
-    schema = get_ventas_schema()
-    df_parsed = df_stream.select(
-        from_json(col("body").cast("string"), schema).alias("data"),
-        col("enqueuedTime").alias("enqueued_time")
-    ).select(
-        "data.*",
-        current_date().alias("batch_date"),
-        current_timestamp().alias("batch_timestamp")
+    namespace, entity_path = (
+        parse_eventhubs_connection_string(
+            connection_string
+        )
     )
 
-    # Escribe en landing/ventas/ particionado por fecha
-    query = df_parsed.writeStream \
-        .format("json") \
-        .option("path", f"{base_path}/landing/ventas/") \
-        .option("checkpointLocation", f"{base_path}/checkpoints/ventas_streaming") \
-        .trigger(processingTime="1 minute") \
-        .start()
+    kafka_topic = (
+        entity_path
+        or eventhub_name
+    )
 
-    logger.info("Consumer Spark iniciado, consumiendo eventos de Event Hubs...")
+    if not kafka_topic:
+        raise ValueError(
+            "No se ha podido determinar el nombre "
+            "del Event Hub."
+        )
+
+    logger.info(
+        "Configurando conexión Kafka con Event Hub '%s'.",
+        kafka_topic
+    )
+
+    return {
+        "kafka.bootstrap.servers": (
+            f"{namespace}:9093"
+        ),
+
+        "subscribe": kafka_topic,
+
+        "kafka.security.protocol": "SASL_SSL",
+
+        "kafka.sasl.mechanism": "PLAIN",
+
+        "kafka.sasl.jaas.config": (
+            "kafkashaded.org.apache.kafka.common.security.plain."
+            "PlainLoginModule required "
+            'username="$ConnectionString" '
+            f'password="{connection_string}";'
+        ),
+
+        "startingOffsets": "earliest",
+
+        "failOnDataLoss": "false"
+    }
+
+
+# ─────────────────────────────────────────
+# DATABRICKS STRUCTURED STREAMING
+# ─────────────────────────────────────────
+
+def start_consumer_spark(
+    connection_string: str,
+    eventhub_name: str,
+    base_path: str
+):
+    """
+    Inicia el consumidor en Databricks utilizando
+    Structured Streaming y el endpoint Kafka de
+    Azure Event Hubs.
+    """
+
+    from pyspark.sql import SparkSession
+    from pyspark.sql.functions import (
+        col,
+        current_date,
+        current_timestamp,
+        from_json
+    )
+
+    spark = (
+        SparkSession
+        .builder
+        .getOrCreate()
+    )
+
+    kafka_options = get_eventhubs_kafka_config(
+        connection_string=connection_string,
+        eventhub_name=eventhub_name
+    )
+
+    logger.info(
+        "Iniciando lectura de Event Hubs "
+        "mediante Kafka..."
+    )
+
+    # ─────────────────────────────────────
+    # LECTURA STREAMING
+    # ─────────────────────────────────────
+
+    df_stream = (
+        spark.readStream
+        .format("kafka")
+        .options(**kafka_options)
+        .load()
+    )
+
+    # ─────────────────────────────────────
+    # PARSEO DE EVENTOS
+    # ─────────────────────────────────────
+
+    schema = get_ventas_schema()
+
+    df_parsed = (
+        df_stream
+        .select(
+            from_json(
+                col("value").cast("string"),
+                schema
+            ).alias("data"),
+
+            col("timestamp").alias(
+                "enqueued_time"
+            )
+        )
+        .select(
+            "data.*",
+            "enqueued_time",
+            current_date().alias(
+                "batch_date"
+            ),
+            current_timestamp().alias(
+                "batch_timestamp"
+            )
+        )
+    )
+
+    # ─────────────────────────────────────
+    # ESCRITURA EN LANDING
+    # ─────────────────────────────────────
+
+    output_path = (
+        f"{base_path}/landing/ventas/"
+    )
+
+    checkpoint_path = (
+        f"{base_path}/checkpoints/"
+        f"ventas_streaming"
+    )
+
+    logger.info(
+        "Escribiendo eventos en: %s",
+        output_path
+    )
+
+    query = (
+        df_parsed
+        .writeStream
+        .format("json")
+        .option(
+            "path",
+            output_path
+        )
+        .option(
+            "checkpointLocation",
+            checkpoint_path
+        )
+        .trigger(
+            processingTime="1 minute"
+        )
+        .start()
+    )
+
+    logger.info(
+        "Consumer Spark iniciado correctamente."
+    )
+
     query.awaitTermination()
 
 
@@ -176,24 +417,73 @@ def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: 
 # ─────────────────────────────────────────
 
 def main():
-    connection_string, eventhub_name = get_credentials()
+
+    connection_string, eventhub_name = (
+        get_eventhubs_credentials()
+    )
+
+    # ─────────────────────────────────────
+    # LOCAL
+    # ─────────────────────────────────────
 
     if os.getenv("ENV", "prod") == "local":
-        start_consumer_local(connection_string, eventhub_name)
-    else:
-        storage_account = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_name")
-        container = dbutils.secrets.get(scope="ad-pipeline", key="adls_container_name")
-        account_key = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_key")
 
-        spark = SparkSession.builder.getOrCreate()
-        spark.conf.set(
-            f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",
-            account_key
+        start_consumer_local(
+            connection_string=connection_string,
+            eventhub_name=eventhub_name
         )
 
-        base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
-        start_consumer_spark(connection_string, eventhub_name, base_path)
+        return
 
+    # ─────────────────────────────────────
+    # DATABRICKS
+    # ─────────────────────────────────────
+
+    storage_account = get_secret(
+        local_key="ADLS_ACCOUNT_NAME",
+        databricks_key="adls_account_name"
+    )
+
+    container = get_secret(
+        local_key="ADLS_CONTAINER_NAME",
+        databricks_key="adls_container_name"
+    )
+
+    account_key = get_secret(
+        local_key="ADLS_ACCOUNT_KEY",
+        databricks_key="adls_account_key"
+    )
+
+    from pyspark.sql import SparkSession
+
+    spark = (
+        SparkSession
+        .builder
+        .getOrCreate()
+    )
+
+    # Configuración de acceso a ADLS Gen2
+    spark.conf.set(
+        f"fs.azure.account.key."
+        f"{storage_account}.dfs.core.windows.net",
+        account_key
+    )
+
+    base_path = (
+        f"abfss://{container}"
+        f"@{storage_account}.dfs.core.windows.net"
+    )
+
+    start_consumer_spark(
+        connection_string=connection_string,
+        eventhub_name=eventhub_name,
+        base_path=base_path
+    )
+
+
+# ─────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────
 
 if __name__ == "__main__":
     main()

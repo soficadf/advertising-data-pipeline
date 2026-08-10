@@ -1,78 +1,134 @@
+
 import logging
 from datetime import datetime, timezone
+from typing import Optional
+
 from azure.storage.filedatalake import DataLakeServiceClient
+
+from config.settings import get_secret
+
 
 logger = logging.getLogger(__name__)
 
-import logging
-import os
-from datetime import datetime, timezone
-from azure.storage.filedatalake import DataLakeServiceClient
 
-logger = logging.getLogger(__name__)
-
-
-def _is_local() -> bool:
-    """Detecta si estamos en local o en Databricks."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-        return os.getenv("ENV", "prod") == "local"
-    except ImportError:
-        return False
-
-
-def _get_credentials() -> tuple:
-    """Lee las credenciales del entorno disponible."""
-    if _is_local():
-        account_name = os.getenv("ADLS_ACCOUNT_NAME")
-        account_key = os.getenv("ADLS_ACCOUNT_KEY")
-        container = os.getenv("ADLS_CONTAINER_NAME")
-        logger.info("Credenciales leídas desde .env")
-    else:
-        account_name = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_name")
-        account_key = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_key")
-        container = dbutils.secrets.get(scope="ad-pipeline", key="adls_container_name")
-        logger.info("Credenciales leídas desde Databricks Secrets")
-
-    if not account_name or not account_key or not container:
-        raise ValueError("Credenciales de ADLS no encontradas")
-
-    return account_name, account_key, container
 
 def get_adls_client() -> DataLakeServiceClient:
-    """Devuelve un cliente autenticado de ADLS Gen2."""
-    account_name, account_key, _ = _get_credentials()
+    """
+    Devuelve un cliente autenticado de ADLS Gen2.
+    """
+
+    account_name = get_secret(
+        local_key="ADLS_ACCOUNT_NAME",
+        databricks_key="adls_account_name"
+    )
+
+    account_key = get_secret(
+        local_key="ADLS_ACCOUNT_KEY",
+        databricks_key="adls_account_key"
+    )
+
     return DataLakeServiceClient(
-        account_url=f"https://{account_name}.dfs.core.windows.net",
+        account_url=(
+            f"https://{account_name}.dfs.core.windows.net"
+        ),
         credential=account_key
     )
 
 
-def upload_to_adls(content: str, layer: str, folder: str, filename: str, target_date=None) -> str:
+# ─────────────────────────────────────────
+# UPLOAD
+# ─────────────────────────────────────────
+
+def upload_to_adls(
+    content: str,
+    layer: str,
+    folder: str,
+    filename: str,
+    target_date: Optional[datetime] = None
+) -> str:
     """
-    Sube un fichero al Data Lake en la capa y carpeta indicadas.
+    Sube un fichero al Data Lake.
 
     Args:
-        content: Contenido del fichero en formato string
-        layer: Capa del Lakehouse (landing, bronze, silver, gold)
-        folder: Subcarpeta dentro de la capa (meta_ads, ventas)
-        filename: Nombre del fichero
-        target_date: Fecha para la partición. Si es None usa la fecha actual.
-    """
-    account_name, account_key, container = _get_credentials()
+        content:
+            Contenido del fichero en formato string.
 
-    client = DataLakeServiceClient(
-        account_url=f"https://{account_name}.dfs.core.windows.net",
-        credential=account_key
+        layer:
+            Capa del Data Lake:
+            landing, bronze, silver, gold.
+
+        folder:
+            Subcarpeta dentro de la capa.
+            Ejemplo: meta_ads, ventas.
+
+        filename:
+            Nombre del fichero.
+
+        target_date:
+            Fecha utilizada para la partición.
+            Si no se indica, se utiliza la fecha actual UTC.
+
+    Returns:
+        Ruta del fichero creado en ADLS.
+    """
+
+    container = get_secret(
+        local_key="ADLS_CONTAINER_NAME",
+        databricks_key="adls_container_name"
     )
 
-    date_path = target_date.strftime("%Y/%m/%d") if target_date else datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    path = f"{layer}/{folder}/{date_path}/{filename}"
+    client = get_adls_client()
 
-    filesystem_client = client.get_file_system_client(container)
-    file_client = filesystem_client.get_file_client(path)
-    file_client.upload_data(content, overwrite=True)
+    date = (
+        target_date
+        if target_date is not None
+        else datetime.now(timezone.utc)
+    )
 
-    logger.info(f"Fichero subido a: {path}")
+    date_path = date.strftime("%Y/%m/%d")
+
+    path = (
+        f"{layer}/"
+        f"{folder}/"
+        f"{date_path}/"
+        f"{filename}"
+    )
+
+    filesystem_client = client.get_file_system_client(
+        container
+    )
+
+    file_client = filesystem_client.get_file_client(
+        path
+    )
+
+    file_client.upload_data(
+        content,
+        overwrite=True
+    )
+
+    logger.info(
+        "Fichero subido a ADLS: %s",
+        path
+    )
+
     return path
+
+def get_adls_base_path() -> tuple[str, str]:
+    """Obtiene las credenciales de ADLS y construye la ruta base."""
+    storage_account = get_secret("ADLS_ACCOUNT_NAME", "adls_account_name")
+    account_key = get_secret("ADLS_ACCOUNT_KEY", "adls_account_key")
+    container = get_secret("ADLS_CONTAINER_NAME", "adls_container_name")
+
+    base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
+
+    return storage_account, account_key, base_path
+
+def configure_spark_adls(spark):
+    storage_account = get_secret("ADLS_ACCOUNT_NAME", "adls_account_name")
+    account_key = get_secret("ADLS_ACCOUNT_KEY", "adls_account_key")
+
+    spark.conf.set(
+        f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",
+        account_key
+    )

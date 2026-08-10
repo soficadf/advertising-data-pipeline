@@ -1,23 +1,32 @@
-import requests
 import json
 import logging
-import sys
 from datetime import datetime, timezone
+
+import requests
+
+from config.adls_client import upload_to_adls
+from config.settings import get_secret
+
+
+# ─────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
-# Permite importar módulos del repo tanto en local como en Databricks
-try:
-    sys.path.append("/Workspace/Repos/tu-usuario/ad-performance-pipeline/src")
-    from config.adls_client import upload_to_adls
-except ImportError:
-    from config.adls_client import upload_to_adls
 
-BASE_URL = "https://graph.facebook.com/v25.0/ads_archive"
+# ─────────────────────────────────────────
+# CONFIGURACIÓN META
+# ─────────────────────────────────────────
+
+BASE_URL = (
+    "https://graph.facebook.com/v25.0/ads_archive"
+)
 
 FIELDS = ",".join([
     "id",
@@ -33,25 +42,54 @@ FIELDS = ",".join([
     "target_locations"
 ])
 
+REQUEST_TIMEOUT = 30
+PAGE_SIZE = 100
+
+
+# ─────────────────────────────────────────
+# CREDENCIALES
+# ─────────────────────────────────────────
 
 def get_meta_token() -> str:
-    """Lee el token de Meta del entorno disponible."""
-    if os.getenv("ENV", "prod") == "local":
-        from dotenv import load_dotenv
-        load_dotenv()
-        token = os.getenv("META_ACCESS_TOKEN")
-        logger.info("Token leído desde .env")
-    else:
-        token = dbutils.secrets.get(scope="ad-pipeline", key="meta_access_token")
-        logger.info("Token leído desde Databricks Secrets")
+    """
+    Obtiene el token de acceso de Meta.
 
-    if not token:
-        raise ValueError("META_ACCESS_TOKEN no encontrado")
-    return token
+    Local:
+        META_ACCESS_TOKEN desde .env.
+
+    Databricks:
+        meta_access_token desde Databricks Secrets.
+    """
+
+    return get_secret(
+        local_key="META_ACCESS_TOKEN",
+        databricks_key="meta_access_token"
+    )
 
 
-def fetch_ads(search_terms: str, country: str = "ES") -> list:
-    """Extrae todos los anuncios de una marca de la Meta Ad Library."""
+# ─────────────────────────────────────────
+# EXTRACCIÓN
+# ─────────────────────────────────────────
+
+def fetch_ads(
+    search_terms: str,
+    country: str = "ES"
+) -> list:
+    """
+    Extrae todos los anuncios activos de una marca
+    de la Meta Ad Library.
+
+    Args:
+        search_terms:
+            Término utilizado para buscar los anuncios.
+
+        country:
+            País en formato ISO. Por defecto, ES.
+
+    Returns:
+        Lista con todos los anuncios encontrados.
+    """
+
     token = get_meta_token()
 
     params = {
@@ -61,63 +99,147 @@ def fetch_ads(search_terms: str, country: str = "ES") -> list:
         "ad_type": "ALL",
         "fields": FIELDS,
         "access_token": token,
-        "limit": 100
+        "limit": PAGE_SIZE
     }
 
     all_ads = []
     page = 1
 
-    while True:
-        logger.info(f"Extrayendo página {page}...")
-        response = requests.get(BASE_URL, params=params)
+    # Session permite reutilizar la conexión HTTP
+    # entre las diferentes páginas.
+    with requests.Session() as session:
 
-        if response.status_code != 200:
-            logger.error(f"Error en la API: {response.text}")
-            break
+        while True:
 
-        data = response.json()
-        ads = data.get("data", [])
-        all_ads.extend(ads)
-        logger.info(f"Página {page}: {len(ads)} anuncios extraídos")
+            logger.info(
+                "Extrayendo página %s...",
+                page
+            )
 
-        cursor_after = data.get("paging", {}).get("cursors", {}).get("after")
-        if not cursor_after:
-            break
+            response = session.get(
+                BASE_URL,
+                params=params,
+                timeout=REQUEST_TIMEOUT
+            )
 
-        params["after"] = cursor_after
-        page += 1
+            try:
+                response.raise_for_status()
+            except requests.HTTPError:
+                logger.error(
+                    "Error en Meta Ad Library API: %s",
+                    response.text
+                )
+                raise
 
-    logger.info(f"Total anuncios extraídos: {len(all_ads)}")
+            data = response.json()
+
+            ads = data.get("data", [])
+
+            all_ads.extend(ads)
+
+            logger.info(
+                "Página %s: %s anuncios extraídos",
+                page,
+                len(ads)
+            )
+
+            cursor_after = (
+                data
+                .get("paging", {})
+                .get("cursors", {})
+                .get("after")
+            )
+
+            if not cursor_after:
+                break
+
+            params["after"] = cursor_after
+
+            page += 1
+
+    logger.info(
+        "Total anuncios extraídos: %s",
+        len(all_ads)
+    )
+
     return all_ads
 
 
+# ─────────────────────────────────────────
+# LANDING
+# ─────────────────────────────────────────
+
 def save_to_landing(ads: list) -> str:
-    """Guarda los anuncios extraídos en la capa landing del Data Lake."""
+    """
+    Guarda los anuncios extraídos en la capa
+    landing del Data Lake.
+    """
+
+    now = datetime.now(timezone.utc)
+
     output = {
-        "extraction_timestamp": datetime.now(timezone.utc).isoformat(),
-        "extraction_date": datetime.now(timezone.utc).date().isoformat(),
+        "extraction_timestamp": now.isoformat(),
+        "extraction_date": now.date().isoformat(),
         "total_ads": len(ads),
         "ads": ads
     }
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"meta_ads_{timestamp}.json"
+    timestamp = now.strftime(
+        "%Y%m%d_%H%M%S"
+    )
+
+    filename = (
+        f"meta_ads_{timestamp}.json"
+    )
 
     path = upload_to_adls(
-        content=json.dumps(output, ensure_ascii=False, indent=2),
+        content=json.dumps(
+            output,
+            ensure_ascii=False,
+            indent=2
+        ),
         layer="landing",
         folder="meta_ads",
         filename=filename
     )
 
+    logger.info(
+        "Datos guardados en landing: %s",
+        path
+    )
+
     return path
 
 
+# ─────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────
+
 def main():
-    logger.info("Iniciando extracción de Meta Ad Library")
-    ads = fetch_ads(search_terms="nude project", country="ES")
+    """
+    Ejecuta la extracción completa:
+
+    Meta Ad Library
+          ↓
+    Landing / Meta Ads
+    """
+
+    logger.info(
+        "Iniciando extracción de Meta Ad Library"
+    )
+
+    ads = fetch_ads(
+        search_terms="nude project",
+        country="ES"
+    )
+
     path = save_to_landing(ads)
-    logger.info(f"Extracción completada. Fichero en: {path}")
+
+    logger.info(
+        "Extracción completada. "
+        "Fichero en: %s",
+        path
+    )
 
 
 if __name__ == "__main__":
