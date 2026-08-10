@@ -44,7 +44,8 @@ def flush_buffer():
     content = json.dumps({
         "batch_timestamp": datetime.now(timezone.utc).isoformat(),
         "total_events": len(buffer),
-        "events": buffer
+        "events": buffer,
+        "batch_date": datetime.now(timezone.utc).date().isoformat(),
     }, ensure_ascii=False, indent=2)
 
     upload_to_adls(

@@ -22,8 +22,7 @@ def get_adls_client() -> DataLakeServiceClient:
         credential=account_key
     )
 
-
-def upload_to_adls(content: str, layer: str, folder: str, filename: str) -> str:
+def upload_to_adls(content: str, layer: str, folder: str, filename: str, target_date=None) -> str:
     """
     Sube un fichero al Data Lake en la capa y carpeta indicadas.
     
@@ -32,16 +31,17 @@ def upload_to_adls(content: str, layer: str, folder: str, filename: str) -> str:
         layer: Capa del Lakehouse (landing, bronze, silver, gold)
         folder: Subcarpeta dentro de la capa (meta_ads, ventas)
         filename: Nombre del fichero
-    
-    Returns:
-        Ruta completa del fichero en el Data Lake
+        target_date: Fecha para la partición. Si es None usa la fecha actual.
     """
     client = get_adls_client()
     container = os.getenv("ADLS_CONTAINER_NAME")
 
-    # Ruta con partición por fecha
-    today = datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    path = f"{layer}/{folder}/{today}/{filename}"
+    if target_date:
+        date_path = target_date.strftime("%Y/%m/%d")
+    else:
+        date_path = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+
+    path = f"{layer}/{folder}/{date_path}/{filename}"
 
     filesystem_client = client.get_file_system_client(container)
     file_client = filesystem_client.get_file_client(path)

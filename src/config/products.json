@@ -1,0 +1,9 @@
+{
+  "products": [
+    {"id": "NP001", "name": "Hoodie Basic", "category": "Sudaderas", "price": 79.90},
+    {"id": "NP002", "name": "Camiseta Oversize", "category": "Camisetas", "price": 39.90},
+    {"id": "NP003", "name": "Jogger", "category": "Pantalones", "price": 69.90},
+    {"id": "NP004", "name": "Crop Top", "category": "Camisetas", "price": 34.90},
+    {"id": "NP005", "name": "Chaqueta", "category": "Chaquetas", "price": 119.90}
+  ]
+}
