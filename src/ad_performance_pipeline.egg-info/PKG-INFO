@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: ad-performance-pipeline
+Version: 0.1.0
+Summary: Data pipeline for advertising performance analysis
+Requires-Python: >=3.10
