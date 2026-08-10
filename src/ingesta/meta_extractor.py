@@ -1,17 +1,21 @@
 import requests
+import json
 import logging
+import sys
 from datetime import datetime, timezone
-from dotenv import load_dotenv
-import os
-from config.adls_client import upload_to_adls
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Permite importar módulos del repo tanto en local como en Databricks
+try:
+    sys.path.append("/Workspace/Repos/tu-usuario/ad-performance-pipeline/src")
+    from config.adls_client import upload_to_adls
+except ImportError:
+    from config.adls_client import upload_to_adls
 
 BASE_URL = "https://graph.facebook.com/v25.0/ads_archive"
 
@@ -30,12 +34,25 @@ FIELDS = ",".join([
 ])
 
 
+def get_meta_token() -> str:
+    """Lee el token de Meta del entorno disponible."""
+    if os.getenv("ENV", "prod") == "local":
+        from dotenv import load_dotenv
+        load_dotenv()
+        token = os.getenv("META_ACCESS_TOKEN")
+        logger.info("Token leído desde .env")
+    else:
+        token = dbutils.secrets.get(scope="ad-pipeline", key="meta_access_token")
+        logger.info("Token leído desde Databricks Secrets")
+
+    if not token:
+        raise ValueError("META_ACCESS_TOKEN no encontrado")
+    return token
+
+
 def fetch_ads(search_terms: str, country: str = "ES") -> list:
     """Extrae todos los anuncios de una marca de la Meta Ad Library."""
-    
-    token = os.getenv("META_ACCESS_TOKEN")
-    if not token:
-        raise ValueError("META_ACCESS_TOKEN no encontrado en .env")
+    token = get_meta_token()
 
     params = {
         "search_terms": search_terms,
@@ -53,7 +70,7 @@ def fetch_ads(search_terms: str, country: str = "ES") -> list:
     while True:
         logger.info(f"Extrayendo página {page}...")
         response = requests.get(BASE_URL, params=params)
-        
+
         if response.status_code != 200:
             logger.error(f"Error en la API: {response.text}")
             break
@@ -74,31 +91,34 @@ def fetch_ads(search_terms: str, country: str = "ES") -> list:
     return all_ads
 
 
-
 def save_to_landing(ads: list) -> str:
     """Guarda los anuncios extraídos en la capa landing del Data Lake."""
-    import json
-    
     output = {
         "extraction_timestamp": datetime.now(timezone.utc).isoformat(),
+        "extraction_date": datetime.now(timezone.utc).date().isoformat(),
         "total_ads": len(ads),
         "ads": ads
     }
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"meta_ads_{timestamp}.json"
-    
+
     path = upload_to_adls(
         content=json.dumps(output, ensure_ascii=False, indent=2),
         layer="landing",
         folder="meta_ads",
         filename=filename
     )
-    
+
     return path
 
 
-if __name__ == "__main__":
+def main():
+    logger.info("Iniciando extracción de Meta Ad Library")
     ads = fetch_ads(search_terms="nude project", country="ES")
     path = save_to_landing(ads)
     logger.info(f"Extracción completada. Fichero en: {path}")
+
+
+if __name__ == "__main__":
+    main()

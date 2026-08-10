@@ -1,3 +1,4 @@
+import os
 import logging
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import explode, col, to_date, to_timestamp, coalesce, regexp_extract, from_json
@@ -8,6 +9,24 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def get_credentials(spark: SparkSession) -> tuple:
+    """Lee las credenciales del entorno disponible."""
+    if os.getenv("ENV", "prod") == "local":
+        from dotenv import load_dotenv
+        load_dotenv()
+        storage_account = os.getenv("ADLS_ACCOUNT_NAME")
+        account_key = os.getenv("ADLS_ACCOUNT_KEY")
+        container = os.getenv("ADLS_CONTAINER_NAME")
+        logger.info("Credenciales leídas desde .env")
+    else:
+        storage_account = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_name")
+        account_key = dbutils.secrets.get(scope="ad-pipeline", key="adls_account_key")
+        container = dbutils.secrets.get(scope="ad-pipeline", key="adls_container_name")
+        logger.info("Credenciales leídas desde Databricks Secrets")
+
+    return storage_account, account_key, container
 
 
 def get_meta_schema() -> StructType:
@@ -55,7 +74,7 @@ def get_ventas_schema() -> StructType:
 
 
 def read_from_landing(spark: SparkSession, base_path: str, source: str, schema: StructType):
-    """Lee ficheros desde landing usando Auto Loader. Genérico para cualquier fuente."""
+    """Lee ficheros desde landing usando Auto Loader."""
     return spark.readStream \
         .format("cloudFiles") \
         .option("cloudFiles.format", "text") \
@@ -68,15 +87,13 @@ def read_from_landing(spark: SparkSession, base_path: str, source: str, schema: 
 
 def transform_meta(df_raw) -> DataFrame:
     """Transforma datos raw de Meta a Bronze."""
-    df_exploded = df_raw.select(
+    return df_raw.select(
         coalesce(
             to_date(col("extraction_date")),
             to_date(regexp_extract(col("file_path"), r"(\d{4}/\d{2}/\d{2})", 1), "yyyy/MM/dd")
         ).alias("fecha"),
         explode(col("ads")).alias("ad")
-    )
-
-    return df_exploded.select(
+    ).select(
         col("fecha"),
         col("ad.id").alias("ad_id"),
         col("ad.eu_total_reach").alias("eu_total_reach"),
@@ -90,12 +107,10 @@ def transform_meta(df_raw) -> DataFrame:
 
 def transform_ventas(df_raw) -> DataFrame:
     """Transforma datos raw de ventas a Bronze."""
-    df_exploded = df_raw.select(
+    return df_raw.select(
         to_date(col("batch_date")).alias("fecha"),
         explode(col("events")).alias("event")
-    )
-
-    return df_exploded.select(
+    ).select(
         col("fecha"),
         col("event.event_id").alias("event_id"),
         to_timestamp(col("event.timestamp")).alias("timestamp"),
@@ -109,17 +124,17 @@ def transform_ventas(df_raw) -> DataFrame:
     )
 
 
-def write_to_bronze(df_bronze, base_path: str, source: str, timeout: int = 60):
-    """Escribe el dataframe en Bronze en formato Delta. Genérico para cualquier fuente."""
+def write_to_bronze(df_bronze, base_path: str, source: str):
+    """Escribe el dataframe en Bronze en formato Delta."""
     query = df_bronze.writeStream \
         .format("delta") \
         .outputMode("append") \
         .option("checkpointLocation", f"{base_path}/checkpoints/{source}_bronze") \
         .partitionBy("fecha") \
-        .trigger(availableNow=True)\
+        .trigger(availableNow=True) \
         .start(f"{base_path}/bronze/{source}/")
 
-    query.awaitTermination(timeout)
+    query.awaitTermination()
     logger.info(f"Bronze {source} escrito correctamente")
 
 
@@ -127,23 +142,20 @@ def process_meta(spark: SparkSession, base_path: str):
     """Proceso completo landing → bronze para Meta Ads."""
     logger.info("Procesando Meta Ads: landing → bronze")
     df_raw = read_from_landing(spark, base_path, "meta_ads", get_meta_schema())
-    df_bronze = transform_meta(df_raw)
-    write_to_bronze(df_bronze, base_path, "meta_ads")
+    write_to_bronze(transform_meta(df_raw), base_path, "meta_ads")
 
 
 def process_ventas(spark: SparkSession, base_path: str):
     """Proceso completo landing → bronze para Ventas."""
     logger.info("Procesando Ventas: landing → bronze")
     df_raw = read_from_landing(spark, base_path, "ventas", get_ventas_schema())
-    df_bronze = transform_ventas(df_raw)
-    write_to_bronze(df_bronze, base_path, "ventas")
+    write_to_bronze(transform_ventas(df_raw), base_path, "ventas")
+
 
 def main():
     spark = SparkSession.builder.getOrCreate()
 
-    storage_account = spark.conf.get("spark.storage_account")
-    account_key = spark.conf.get("spark.account_key")
-    container = spark.conf.get("spark.container")
+    storage_account, account_key, container = get_credentials(spark)
 
     spark.conf.set(
         f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",
