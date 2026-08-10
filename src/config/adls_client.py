@@ -18,13 +18,11 @@ def get_adls_client() -> DataLakeServiceClient:
     """
 
     account_name = get_secret(
-        local_key="ADLS_ACCOUNT_NAME",
-        databricks_key="adls_account_name"
+        key="ADLS_ACCOUNT_NAME"
     )
 
     account_key = get_secret(
-        local_key="ADLS_ACCOUNT_KEY",
-        databricks_key="adls_account_key"
+        key="ADLS_ACCOUNT_KEY"
     )
 
     return DataLakeServiceClient(
@@ -73,8 +71,7 @@ def upload_to_adls(
     """
 
     container = get_secret(
-        local_key="ADLS_CONTAINER_NAME",
-        databricks_key="adls_container_name"
+        key="ADLS_CONTAINER_NAME"
     )
 
     client = get_adls_client()
@@ -116,17 +113,17 @@ def upload_to_adls(
 
 def get_adls_base_path() -> tuple[str, str]:
     """Obtiene las credenciales de ADLS y construye la ruta base."""
-    storage_account = get_secret("ADLS_ACCOUNT_NAME", "adls_account_name")
-    account_key = get_secret("ADLS_ACCOUNT_KEY", "adls_account_key")
-    container = get_secret("ADLS_CONTAINER_NAME", "adls_container_name")
+    storage_account = get_secret("ADLS_ACCOUNT_NAME")
+    account_key = get_secret("ADLS_ACCOUNT_KEY")
+    container = get_secret("ADLS_CONTAINER_NAME")
 
     base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
 
     return storage_account, account_key, base_path
 
 def configure_spark_adls(spark):
-    storage_account = get_secret("ADLS_ACCOUNT_NAME", "adls_account_name")
-    account_key = get_secret("ADLS_ACCOUNT_KEY", "adls_account_key")
+    storage_account = get_secret("ADLS_ACCOUNT_NAME")
+    account_key = get_secret("ADLS_ACCOUNT_KEY")
 
     spark.conf.set(
         f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",

@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 def get_adls_base_path() -> tuple:
     """Obtiene las credenciales de ADLS y construye la ruta base."""
-    storage_account = get_secret("ADLS_ACCOUNT_NAME", "adls_account_name")
-    account_key = get_secret("ADLS_ACCOUNT_KEY", "adls_account_key")
-    container = get_secret("ADLS_CONTAINER_NAME", "adls_container_name")
+    storage_account = get_secret("ADLS_ACCOUNT_NAME")
+    account_key = get_secret("ADLS_ACCOUNT_KEY")
+    container = get_secret("ADLS_CONTAINER_NAME")
 
     base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
 

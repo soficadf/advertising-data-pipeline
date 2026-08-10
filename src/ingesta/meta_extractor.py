@@ -62,8 +62,7 @@ def get_meta_token() -> str:
     """
 
     return get_secret(
-        local_key="META_ACCESS_TOKEN",
-        databricks_key="meta_access_token"
+        key="META_ACCESS_TOKEN"
     )
 
 

@@ -47,13 +47,11 @@ def get_eventhubs_credentials() -> tuple[str, str]:
     """
 
     connection_string = get_secret(
-        local_key="EVENT_HUBS_CONNECTION_STRING",
-        databricks_key="event_hubs_connection_string"
+        key="EVENT_HUBS_CONNECTION_STRING"
     )
 
     eventhub_name = get_secret(
-        local_key="EVENT_HUBS_NAME",
-        databricks_key="event_hubs_name"
+        key="EVENT_HUBS_NAME"
     )
 
     return connection_string, eventhub_name
@@ -440,18 +438,15 @@ def main():
     # ─────────────────────────────────────
 
     storage_account = get_secret(
-        local_key="ADLS_ACCOUNT_NAME",
-        databricks_key="adls_account_name"
+        key="ADLS_ACCOUNT_NAME"
     )
 
     container = get_secret(
-        local_key="ADLS_CONTAINER_NAME",
-        databricks_key="adls_container_name"
+        key="ADLS_CONTAINER_NAME"
     )
 
     account_key = get_secret(
-        local_key="ADLS_ACCOUNT_KEY",
-        databricks_key="adls_account_key"
+        key="ADLS_ACCOUNT_KEY"
     )
 
     from pyspark.sql import SparkSession

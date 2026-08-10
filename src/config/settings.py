@@ -2,8 +2,6 @@
 import logging
 import os
 
-from dotenv import load_dotenv
-
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +24,7 @@ def is_local() -> bool:
 # ─────────────────────────────────────────
 
 def get_secret(
-    local_key: str,
-    databricks_key: str,
+    key: str,
     required: bool = True
 ) -> str | None:
     """
@@ -42,10 +39,10 @@ def get_secret(
         Obtiene el valor desde Databricks Secrets.
 
     Args:
-        local_key:
+        key:
             Nombre de la variable de entorno local.
 
-        databricks_key:
+        key:
             Nombre de la key en Databricks Secrets.
 
         required:
@@ -57,10 +54,10 @@ def get_secret(
     """
 
     if is_local():
-
+        from dotenv import load_dotenv
         load_dotenv()
 
-        value = os.getenv(local_key)
+        value = os.getenv(key)
 
         if value:
             logger.info(
@@ -72,7 +69,7 @@ def get_secret(
         try:
             value = dbutils.secrets.get(
                 scope="ad-pipeline",
-                key=databricks_key
+                key=key
             )
 
             logger.info(
@@ -91,7 +88,7 @@ def get_secret(
     if required and not value:
         raise ValueError(
             f"Configuración requerida no encontrada: "
-            f"{local_key}"
+            f"{key}"
         )
 
     return value
