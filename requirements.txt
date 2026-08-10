@@ -7,3 +7,4 @@ pytest==8.0.
 pyodbc==5.1.0
 sqlalchemy==2.0.30
 pandas==2.2.2
+databricks-connect==17.3.*
