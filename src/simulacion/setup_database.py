@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def load_products() -> list:
-    config_path = os.path.join(os.path.dirname(__file__), "../config/products.json")
+    config_path = os.path.join(os.path.dirname(__file__), "products.json")
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)["products"]
 

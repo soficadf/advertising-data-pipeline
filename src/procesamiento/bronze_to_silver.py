@@ -148,7 +148,6 @@ def main():
         "password": sql_password,
         "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver"
     }
-    logger.info(jdbc_properties)
 
     logger.info("Iniciando proceso bronze → silver")
 

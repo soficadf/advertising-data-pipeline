@@ -114,9 +114,9 @@ def upload_to_adls(
 
 def get_adls_base_path() -> tuple[str, str]:
     """Obtiene las credenciales de ADLS y construye la ruta base."""
-    storage_account =  os.getenv("ADLS_ACCOUNT_NAME")
+    storage_account =  get_secret("ADLS_ACCOUNT_NAME")
     account_key = get_secret("ADLS_ACCOUNT_KEY")
-    container =  os.getenv("ADLS_CONTAINER_NAME")
+    container =  get_secret("ADLS_CONTAINER_NAME")
 
     base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
 
