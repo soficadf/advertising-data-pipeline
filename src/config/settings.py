@@ -15,7 +15,8 @@ def is_local() -> bool:
     Indica si la aplicación se está ejecutando
     en entorno local.
     """
-
+    from dotenv import load_dotenv
+    load_dotenv()
     return os.getenv("ENV", "prod") == "local"
 
 
@@ -49,10 +50,10 @@ def get_secret(
     Returns:
         Valor de configuración o None si no es obligatorio.
     """
+    from dotenv import load_dotenv
+    load_dotenv()
 
     if is_local():
-        from dotenv import load_dotenv
-        load_dotenv()
 
         value = os.getenv(key)
 
