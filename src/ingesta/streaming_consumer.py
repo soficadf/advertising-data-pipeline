@@ -130,7 +130,7 @@ def get_eventhubs_kafka_config(connection_string: str, eventhub_name: str) -> di
     }
 
 
-def make_write_batch(container: str):
+def make_write_batch(container: str, account_name:str,account_key:str):
     """Returns a foreachBatch function with pre-resolved ADLS credentials."""
     def write_batch(df_batch, batch_id):
         if df_batch.isEmpty():
@@ -150,13 +150,13 @@ def make_write_batch(container: str):
 
         upload_to_adls(
             content=content, layer="landing", folder="ventas", filename=filename,
-            container=container
+            container=container, account_key=account_key,account_name=account_name
         )
         logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
     return write_batch
 
 def start_consumer_spark(connection_string, eventhub_name, base_path,
-                         container):
+                         container, account_name, account_key):
     """
     Inicia el consumidor en Databricks usando Structured Streaming
     y el endpoint Kafka de Azure Event Hubs.
@@ -188,7 +188,7 @@ def start_consumer_spark(connection_string, eventhub_name, base_path,
 
     checkpoint_path = f"{base_path}/checkpoints/ventas_streaming"
     query = df_parsed.writeStream \
-        .foreachBatch(make_write_batch(container)) \
+        .foreachBatch(make_write_batch(container,account_name,account_key)) \
         .option("checkpointLocation", checkpoint_path) \
         .trigger(processingTime="1 minute") \
         .start()
@@ -238,7 +238,9 @@ def main():
         connection_string=connection_string,
         eventhub_name=eventhub_name,
         base_path=base_path,
-        container=container
+        container=container,
+        account_key= account_key,
+        account_name=storage_account
     )
 
 
