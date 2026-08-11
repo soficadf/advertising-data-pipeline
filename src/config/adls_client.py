@@ -1,4 +1,3 @@
-
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -13,18 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 
-def get_adls_client() -> DataLakeServiceClient:
+def get_adls_client(acount_name=None,acount_key=None) -> DataLakeServiceClient:
     """
     Devuelve un cliente autenticado de ADLS Gen2.
     """
-   
-    account_name = get_secret(
-        key="ADLS_ACCOUNT_NAME"
-    )
-
-    account_key = get_secret(
-        key="ADLS_ACCOUNT_KEY"
-    )
+    if not acount_name:
+        account_name = get_secret(
+            key="ADLS_ACCOUNT_NAME"
+        )
+    if not account_key:
+        account_key = get_secret(
+            key="ADLS_ACCOUNT_KEY"
+        )
 
     return DataLakeServiceClient(
         account_url=(
@@ -38,7 +37,7 @@ def get_adls_client() -> DataLakeServiceClient:
 # UPLOAD
 # ─────────────────────────────────────────
 def upload_to_adls(content, layer, folder, filename,
-                    target_date=None):
+                   container=None, target_date=None, acount_name=None, account_key=None):
     """
     Sube un fichero al Data Lake.
 
@@ -64,12 +63,12 @@ def upload_to_adls(content, layer, folder, filename,
     Returns:
         Ruta del fichero creado en ADLS.
     """
-    
-    container = get_secret(
-        key="ADLS_CONTAINER_NAME"
-    )
+    if container is None:
+        container = get_secret(
+            key="ADLS_CONTAINER_NAME"
+        )
 
-    client = get_adls_client()
+    client = get_adls_client(acount_name,account_key)
 
     date = (
         target_date
