@@ -161,7 +161,7 @@ def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: 
     y el endpoint Kafka de Azure Event Hubs.
     """
     from pyspark.sql import SparkSession
-    from pyspark.sql.functions import col, current_date, current_timestamp, from_json
+    from pyspark.sql.functions import col, from_json
     from schemas.ventas import get_ventas_schema
 
     spark = SparkSession.builder.getOrCreate()
@@ -182,9 +182,7 @@ def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: 
         col("timestamp").alias("enqueued_time")
     ).select(
         "data.*",
-        "enqueued_time",
-        current_date().alias("batch_date"),
-        current_timestamp().alias("batch_timestamp")
+        "enqueued_time"
     )
 
     checkpoint_path = f"{base_path}/checkpoints/ventas_streaming"
