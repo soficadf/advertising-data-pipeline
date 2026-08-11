@@ -15,8 +15,12 @@ def is_local() -> bool:
     Indica si la aplicación se está ejecutando
     en entorno local.
     """
-    from dotenv import load_dotenv
-    load_dotenv()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        logger.info("python-dotenv no disponible; usando configuración de Databricks")
+
     return os.getenv("ENV", "prod") == "local"
 
 
@@ -50,8 +54,12 @@ def get_secret(
     Returns:
         Valor de configuración o None si no es obligatorio.
     """
-    from dotenv import load_dotenv
-    load_dotenv()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        logger.info("python-dotenv no disponible; usando configuración de Databricks")
+
 
     if is_local():
 

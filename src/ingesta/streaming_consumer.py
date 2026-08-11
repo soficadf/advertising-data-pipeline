@@ -130,32 +130,33 @@ def get_eventhubs_kafka_config(connection_string: str, eventhub_name: str) -> di
     }
 
 
-def write_batch(df_batch, batch_id):
-    """
-    Escribe cada micro-batch en formato compatible con landing_bronze.
-    Mismo formato que el consumer local: batch_date, batch_timestamp,
-    total_events y events como array.
-    """
-    if df_batch.isEmpty():
-        logger.info("Batch %s vacío, nada que escribir.", batch_id)
-        return
+def make_write_batch(container: str):
+    """Returns a foreachBatch function with pre-resolved ADLS credentials."""
+    def write_batch(df_batch, batch_id):
+        if df_batch.isEmpty():
+            logger.info("Batch %s vacío, nada que escribir.", batch_id)
+            return
 
-    events = [row.asDict() for row in df_batch.collect()]
-    now = datetime.now(timezone.utc)
-    filename = f"ventas_{now.strftime('%Y%m%d_%H%M%S%f')}.json"
+        events = [row.asDict() for row in df_batch.collect()]
+        now = datetime.now(timezone.utc)
+        filename = f"ventas_{now.strftime('%Y%m%d_%H%M%S%f')}.json"
 
-    content = json.dumps({
-        "batch_date": now.date().isoformat(),
-        "batch_timestamp": now.isoformat(),
-        "total_events": len(events),
-        "events": events
-    }, ensure_ascii=False, indent=2, default=str)
+        content = json.dumps({
+            "batch_date": now.date().isoformat(),
+            "batch_timestamp": now.isoformat(),
+            "total_events": len(events),
+            "events": events
+        }, ensure_ascii=False, indent=2, default=str)
 
-    upload_to_adls(content=content, layer="landing", folder="ventas", filename=filename)
-    logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
+        upload_to_adls(
+            content=content, layer="landing", folder="ventas", filename=filename,
+            container=container
+        )
+        logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
+    return write_batch
 
-
-def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: str):
+def start_consumer_spark(connection_string, eventhub_name, base_path,
+                         container):
     """
     Inicia el consumidor en Databricks usando Structured Streaming
     y el endpoint Kafka de Azure Event Hubs.
@@ -186,9 +187,8 @@ def start_consumer_spark(connection_string: str, eventhub_name: str, base_path: 
     )
 
     checkpoint_path = f"{base_path}/checkpoints/ventas_streaming"
-
     query = df_parsed.writeStream \
-        .foreachBatch(write_batch) \
+        .foreachBatch(make_write_batch(container)) \
         .option("checkpointLocation", checkpoint_path) \
         .trigger(processingTime="1 minute") \
         .start()
@@ -237,7 +237,8 @@ def main():
     start_consumer_spark(
         connection_string=connection_string,
         eventhub_name=eventhub_name,
-        base_path=base_path
+        base_path=base_path,
+        container=container
     )
 
 

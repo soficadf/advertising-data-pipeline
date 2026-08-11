@@ -37,14 +37,8 @@ def get_adls_client() -> DataLakeServiceClient:
 # ─────────────────────────────────────────
 # UPLOAD
 # ─────────────────────────────────────────
-
-def upload_to_adls(
-    content: str,
-    layer: str,
-    folder: str,
-    filename: str,
-    target_date: Optional[datetime] = None
-) -> str:
+def upload_to_adls(content, layer, folder, filename,
+                   container=None, target_date=None):
     """
     Sube un fichero al Data Lake.
 
@@ -70,10 +64,10 @@ def upload_to_adls(
     Returns:
         Ruta del fichero creado en ADLS.
     """
-
-    container = get_secret(
-        key="ADLS_CONTAINER_NAME"
-    )
+    if container is None:
+        container = get_secret(
+            key="ADLS_CONTAINER_NAME"
+        )
 
     client = get_adls_client()
 
