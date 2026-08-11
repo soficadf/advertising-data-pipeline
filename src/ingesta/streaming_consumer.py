@@ -149,7 +149,7 @@ def write_batch(df_batch, batch_id):
         "batch_timestamp": now.isoformat(),
         "total_events": len(events),
         "events": events
-    }, ensure_ascii=False, indent=2)
+    }, ensure_ascii=False, indent=2, default=str)
 
     upload_to_adls(content=content, layer="landing", folder="ventas", filename=filename)
     logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
