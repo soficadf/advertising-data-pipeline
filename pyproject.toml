@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ad-performance-pipeline"
-version = "0.1.5"
+version = "0.1.8"
 description = "Data pipeline for advertising performance analysis"
 requires-python = ">=3.10"
 

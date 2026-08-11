@@ -1,7 +1,7 @@
 
 import logging
 
-from config.adls_client import configure_spark_adls
+from config.adls_client import configure_spark_adls, get_adls_base_path
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, sum, round, explode, coalesce, lit
 
@@ -14,16 +14,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-def get_adls_base_path() -> tuple:
-    """Obtiene las credenciales de ADLS y construye la ruta base."""
-    storage_account = get_secret("ADLS_ACCOUNT_NAME")
-    account_key = get_secret("ADLS_ACCOUNT_KEY")
-    container = get_secret("ADLS_CONTAINER_NAME")
-
-    base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
-
-    return storage_account, account_key, base_path
 
 
 def transform_ventas_to_silver(spark, base_path: str) -> DataFrame:

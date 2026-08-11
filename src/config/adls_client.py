@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+import os
 
 from azure.storage.filedatalake import DataLakeServiceClient
 
@@ -113,13 +114,13 @@ def upload_to_adls(
 
 def get_adls_base_path() -> tuple[str, str]:
     """Obtiene las credenciales de ADLS y construye la ruta base."""
-    storage_account = get_secret("ADLS_ACCOUNT_NAME")
+    storage_account =  os.getenv("ADLS_ACCOUNT_NAME")
     account_key = get_secret("ADLS_ACCOUNT_KEY")
-    container = get_secret("ADLS_CONTAINER_NAME")
+    container =  os.getenv("ADLS_CONTAINER_NAME")
 
     base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
 
-    return storage_account, account_key, base_path
+    return  base_path
 
 def configure_spark_adls(spark):
     storage_account = get_secret("ADLS_ACCOUNT_NAME")
