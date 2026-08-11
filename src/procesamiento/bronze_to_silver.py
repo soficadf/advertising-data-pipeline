@@ -138,20 +138,17 @@ def main():
     base_path = get_adls_base_path()
     configure_spark_adls(spark)
     
-    sql_password = get_secret("AZURE_SQL_PASSWORD", "sql_password")
+    sql_password = get_secret("AZURE_SQL_PASSWORD")
 
-    jdbc_url = (
-        "jdbc:sqlserver://ad-pipeline-server.database.windows.net:1433;"
-        "database=ad-pipeline-db;"
-        "encrypt=true;"
-        "trustServerCertificate=true;"
-    )
+    jdbc_url ="jdbc:sqlserver://ad-pipeline-server.database.windows.net:1433;database=ad-pipeline-db;encrypt=true;trustServerCertificate=true;"
+    
 
     jdbc_properties = {
         "user": "admin_ad_pipeline",
         "password": sql_password,
         "driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver"
     }
+    logger.info(jdbc_properties)
 
     logger.info("Iniciando proceso bronze → silver")
 
