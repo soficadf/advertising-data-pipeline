@@ -1,5 +1,4 @@
 import json
-import math
 import random
 import logging
 import copy
@@ -8,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import pyodbc
 from config.adls_client import upload_to_adls
+from procesamiento.model import DatasetsLanding, Layers
 
 load_dotenv()
 
@@ -56,11 +56,11 @@ def load_today_ads() -> list:
     client = get_adls_client()
     filesystem = client.get_file_system_client(container)
 
-    paths = list(filesystem.get_paths(path="landing/meta_ads", recursive=True))
+    paths = list(filesystem.get_paths(path=f"{Layers.LANDING.value}/{DatasetsLanding.META.value}", recursive=True))
     json_files = sorted([p.name for p in paths if p.name.endswith(".json")])
 
     if not json_files:
-        raise FileNotFoundError("No hay ficheros de Meta en landing/meta_ads/")
+        raise FileNotFoundError("No hay ficheros de Meta en landing")
 
     latest = json_files[-1]
     logger.info(f"Usando como base: {latest}")
@@ -148,8 +148,8 @@ def run_meta_backfill(days: int = 30):
 
         upload_to_adls(
             content=content,
-            layer="landing",
-            folder="meta_ads",
+            layer={Layers.LANDING.value},
+            folder={DatasetsLanding.META.value},
             filename=filename,
             target_date=target_date
         )

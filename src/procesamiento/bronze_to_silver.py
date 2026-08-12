@@ -1,24 +1,49 @@
-
 import logging
 
 from config.adls_client import configure_spark_adls, get_adls_base_path
 from pyspark.sql import DataFrame
-from pyspark.sql.functions import col, sum, round, explode, coalesce, lit
+from pyspark.sql.functions import  sum, round, col, explode,coalesce,lit
 
 from config.settings import get_secret, get_spark_session
+from model import DatasetsSilver, Layers,DatasetsBronze, TablesSQl
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
 
+def read_sql_tables(spark, jdbc_url: str, jdbc_properties: dict) -> tuple:
+    """Lee las tablas de Azure SQL."""
 
-def transform_ventas_to_silver(spark, base_path: str) -> DataFrame:
+    df_spend = spark.read.jdbc(
+        url=jdbc_url,
+        table=TablesSQl.SPEND.value,
+        properties=jdbc_properties
+    )
+
+    df_mapping = spark.read.jdbc(
+        url=jdbc_url,
+        table=TablesSQl.PRODUCT_MAP.value,
+        properties=jdbc_properties
+    )
+
+    df_products = spark.read.jdbc(
+        url=jdbc_url,
+        table=TablesSQl.PRODUCTS.value,
+        properties=jdbc_properties
+    )
+
+    logger.info(f"SQL leído: {df_spend.count()} spend, {df_mapping.count()} mappings, {df_products.count()} products")
+    return df_spend, df_mapping, df_products
+
+def transform_ventas(spark, base_path: str) -> DataFrame:
     """Lee Bronze ventas y agrega por producto y fecha."""
-    return spark.read.format("delta").load(f"{base_path}/bronze/ventas/") \
+
+    return spark.read.format("delta").load(f"{base_path}/{Layers.BRONZE.value}/{DatasetsBronze.VENTAS.value}/") \
         .filter(col("fecha").isNotNull()) \
         .groupBy("fecha", "product_id", "product_name") \
         .agg(
@@ -27,50 +52,9 @@ def transform_ventas_to_silver(spark, base_path: str) -> DataFrame:
         ) \
         .orderBy("fecha", "product_id")
 
-
-def write_silver_ventas(df: DataFrame, base_path: str):
-    """Escribe Silver ventas en Delta."""
-    df.write.format("delta").mode("overwrite").partitionBy("fecha") \
-        .save(f"{base_path}/silver/ventas_diarias/")
-
-    logger.info(f"Silver Ventas escrito: {df.count()} registros")
-
-
-def read_sql_tables(spark, jdbc_url: str, jdbc_properties: dict) -> tuple:
-    """Lee las tablas de Azure SQL."""
-    df_spend = spark.read.jdbc(
-        url=jdbc_url,
-        table="daily_spend",
-        properties=jdbc_properties
-    )
-
-    df_mapping = spark.read.jdbc(
-        url=jdbc_url,
-        table="ad_product_mapping",
-        properties=jdbc_properties
-    )
-
-    df_products = spark.read.jdbc(
-        url=jdbc_url,
-        table="products",
-        properties=jdbc_properties
-    )
-
-    logger.info(
-        f"SQL leído: {df_spend.count()} spend, "
-        f"{df_mapping.count()} mappings, "
-        f"{df_products.count()} productos"
-    )
-
-    return df_spend, df_mapping, df_products
-
-
-def transform_spend_to_silver(
-    df_spend: DataFrame,
-    df_mapping: DataFrame,
-    df_products: DataFrame
-) -> DataFrame:
+def transform_spend(df_spend: DataFrame,df_mapping: DataFrame,df_products: DataFrame) -> DataFrame:
     """Une las tablas de SQL y genera Silver Ad Spend."""
+
     return df_spend \
         .join(df_mapping, "ad_id", "left") \
         .join(df_products, "product_id", "left") \
@@ -85,17 +69,10 @@ def transform_spend_to_silver(
         .orderBy("fecha", "ad_id")
 
 
-def write_silver_spend(df: DataFrame, base_path: str):
-    """Escribe Silver Ad Spend en Delta."""
-    df.write.format("delta").mode("overwrite").partitionBy("fecha") \
-        .save(f"{base_path}/silver/ad_spend/")
-
-    logger.info(f"Silver Ad Spend escrito: {df.count()} registros")
-
-
-def transform_meta_to_silver(spark, base_path: str) -> DataFrame:
+def transform_meta(spark, base_path: str) -> DataFrame:
     """Lee Bronze Meta y explota el desglose demográfico."""
-    df_bronze = spark.read.format("delta").load(f"{base_path}/bronze/meta_ads/")
+
+    df_bronze = spark.read.format("delta").load(f"{base_path}/{Layers.BRONZE.value}/{DatasetsBronze.META.value}/")
 
     return df_bronze.select(
         col("fecha"), col("ad_id"), col("eu_total_reach"),
@@ -123,18 +100,14 @@ def transform_meta_to_silver(spark, base_path: str) -> DataFrame:
     )
 
 
-def write_silver_meta(df: DataFrame, base_path: str):
-    """Escribe Silver Meta en Delta."""
+def write_to_silver(df: DataFrame, base_path: str, name:str):
     df.write.format("delta").mode("overwrite").partitionBy("fecha") \
-        .save(f"{base_path}/silver/meta_ads/")
+        .save(f"{base_path}/silver/{name}/")
 
-    logger.info(f"Silver Meta escrito: {df.count()} registros")
-
+    logger.info(f"Silver {name} escrito: {df.count()} registros")
 
 def main():
     spark = get_spark_session()
-
-      
     base_path = get_adls_base_path()
     configure_spark_adls(spark)
     
@@ -142,7 +115,6 @@ def main():
 
     jdbc_url ="jdbc:sqlserver://ad-pipeline-server.database.windows.net:1433;database=ad-pipeline-db;encrypt=true;trustServerCertificate=true;"
     
-
     jdbc_properties = {
         "user": "admin_ad_pipeline",
         "password": sql_password,
@@ -152,31 +124,26 @@ def main():
     logger.info("Iniciando proceso bronze → silver")
 
     logger.info("Procesando Ventas...")
-    write_silver_ventas(
-        transform_ventas_to_silver(spark, base_path),
-        base_path
+    write_to_silver(
+        transform_ventas(spark, base_path),
+        base_path,
+        DatasetsSilver.VENTAS.value
     )
 
     logger.info("Procesando Ad Spend...")
-    df_spend, df_mapping, df_products = read_sql_tables(
-        spark,
-        jdbc_url,
-        jdbc_properties
-    )
+    df_spend, df_mapping, df_products = read_sql_tables(spark,jdbc_url,jdbc_properties)
 
-    write_silver_spend(
-        transform_spend_to_silver(
-            df_spend,
-            df_mapping,
-            df_products
-        ),
-        base_path
+    write_to_silver(
+        transform_spend(df_spend,df_mapping,df_products),
+        base_path,
+        DatasetsSilver.SPEND.value
     )
 
     logger.info("Procesando Meta Ads...")
-    write_silver_meta(
-        transform_meta_to_silver(spark, base_path),
-        base_path
+    write_to_silver(
+        transform_meta(spark, base_path),
+        base_path,
+        DatasetsSilver.META.value
     )
 
     logger.info("Proceso bronze → silver completado")

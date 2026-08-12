@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+from procesamiento.model import DatasetsLanding, Layers
 from simulacion.ventas_utils import (
     get_product_weights, get_daily_spend,
     ventas_por_dia, generate_sale_event
@@ -44,8 +45,8 @@ def run_backfill(days: int = 30):
 
         upload_to_adls(
             content=content,
-            layer="landing",
-            folder="ventas",
+            layer={Layers.LANDING.value},
+            folder={DatasetsLanding.VENTAS.value},
             filename=filename,
             target_date=target_date
         )

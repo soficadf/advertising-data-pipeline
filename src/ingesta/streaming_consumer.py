@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from config.adls_client import upload_to_adls
 from config.settings import get_secret, is_local
+from procesamiento.model import DatasetsLanding, Layers
 
 
 logging.basicConfig(
@@ -17,29 +18,6 @@ BUFFER_SIZE = 10
 buffer = []
 
 
-def get_eventhubs_credentials() -> tuple:
-    """Obtiene las credenciales de Azure Event Hubs."""
-    connection_string = get_secret(key="EVENT_HUBS_CONNECTION_STRING")
-    eventhub_name = get_secret(key="EVENT_HUBS_NAME")
-    return connection_string, eventhub_name
-
-
-def parse_eventhubs_connection_string(connection_string: str) -> tuple:
-    """Extrae el namespace y el Event Hub de la connection string."""
-    endpoint_match = re.search(r"Endpoint=sb://([^/]+)", connection_string)
-    if not endpoint_match:
-        raise ValueError("No se pudo obtener el namespace de la connection string.")
-
-    namespace = endpoint_match.group(1)
-    entity_path_match = re.search(r"(?:^|;)EntityPath=([^;]+)", connection_string)
-    eventhub_name = entity_path_match.group(1) if entity_path_match else None
-
-    return namespace, eventhub_name
-
-
-# ─────────────────────────────────────────
-# MODO LOCAL — EVENT HUBS SDK
-# ─────────────────────────────────────────
 
 def on_event(partition_context, event):
     """Callback ejecutado cada vez que llega un evento en modo local."""
@@ -71,8 +49,8 @@ def flush_buffer():
         "events": buffer
     }, ensure_ascii=False, indent=2)
 
-    upload_to_adls(content=content, layer="landing", folder="ventas", filename=filename)
-    logger.info("Buffer de %s eventos escrito en landing/ventas/", len(buffer))
+    upload_to_adls(content=content, layer=Layers.LANDING.value, folder=DatasetsLanding.VENTAS.value, filename=filename)
+    logger.info("Buffer de %s eventos escrito en landing", len(buffer))
     buffer = []
 
 
@@ -98,13 +76,11 @@ def start_consumer_local(connection_string: str, eventhub_name: str):
         logger.info("Consumer detenido manualmente.")
 
 
-# ─────────────────────────────────────────
-# MODO PROD — DATABRICKS STRUCTURED STREAMING
-# ─────────────────────────────────────────
 
 def get_eventhubs_kafka_config(connection_string: str, eventhub_name: str) -> dict:
     """Genera la configuración Kafka para conectarse a Azure Event Hubs."""
-    namespace, entity_path = parse_eventhubs_connection_string(connection_string)
+    namespace= get_secret("NAMESPACE_EVENTHUB")
+    entity_path = get_secret("EVENTHUB_NAME")
     kafka_topic = entity_path or eventhub_name
 
     if not kafka_topic:
@@ -130,6 +106,7 @@ def get_eventhubs_kafka_config(connection_string: str, eventhub_name: str) -> di
 
 def make_write_batch(container: str, account_name:str,account_key:str):
     """Returns a foreachBatch function with pre-resolved ADLS credentials."""
+
     def write_batch(df_batch, batch_id):
         if df_batch.isEmpty():
             logger.info("Batch %s vacío, nada que escribir.", batch_id)
@@ -147,7 +124,7 @@ def make_write_batch(container: str, account_name:str,account_key:str):
         }, ensure_ascii=False, indent=2, default=str)
 
         upload_to_adls(
-            content=content, layer="landing", folder="ventas", filename=filename,
+            content=content,  layer=Layers.LANDING.value, folder=DatasetsLanding.VENTAS.value, filename=filename,
             container=container, account_key=account_key,account_name=account_name
         )
         logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
@@ -196,42 +173,39 @@ def start_consumer_spark(connection_string, eventhub_name, base_path,
     query.awaitTermination()
 
 
-# ─────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────
 
 def main():
-    connection_string, eventhub_name = get_eventhubs_credentials()
+    connection_string = get_secret(key="EVENT_HUBS_CONNECTION_STRING")
+    eventhub_name = get_secret(key="EVENT_HUBS_NAME")
    
     if is_local():
         start_consumer_local(
             connection_string=connection_string,
             eventhub_name=eventhub_name
         )
-        return
+    else:
+        storage_account = get_secret(key="ADLS_ACCOUNT_NAME")
+        container = get_secret(key="ADLS_CONTAINER_NAME")
+        account_key = get_secret(key="ADLS_ACCOUNT_KEY")
 
-    storage_account = get_secret(key="ADLS_ACCOUNT_NAME")
-    container = get_secret(key="ADLS_CONTAINER_NAME")
-    account_key = get_secret(key="ADLS_ACCOUNT_KEY")
+        from pyspark.sql import SparkSession
+        spark = SparkSession.builder.getOrCreate()
 
-    from pyspark.sql import SparkSession
-    spark = SparkSession.builder.getOrCreate()
+        spark.conf.set(
+            f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",
+            account_key
+        )
 
-    spark.conf.set(
-        f"fs.azure.account.key.{storage_account}.dfs.core.windows.net",
-        account_key
-    )
+        base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
 
-    base_path = f"abfss://{container}@{storage_account}.dfs.core.windows.net"
-
-    start_consumer_spark(
-        connection_string=connection_string,
-        eventhub_name=eventhub_name,
-        base_path=base_path,
-        container=container,
-        account_key= account_key,
-        account_name=storage_account
-    )
+        start_consumer_spark(
+            connection_string=connection_string,
+            eventhub_name=eventhub_name,
+            base_path=base_path,
+            container=container,
+            account_key= account_key,
+            account_name=storage_account
+        )
 
 
 if __name__ == "__main__":

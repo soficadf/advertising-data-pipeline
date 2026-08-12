@@ -1,19 +1,13 @@
 
 import logging
 import os
-
-
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
-# ENVIRONMENT
-# ─────────────────────────────────────────
 
 def is_local() -> bool:
     """
-    Indica si la aplicación se está ejecutando
-    en entorno local.
+    Indica si la aplicación se está ejecutandoen entorno local.
     """
     try:
         from dotenv import load_dotenv
@@ -24,35 +18,11 @@ def is_local() -> bool:
     return os.getenv("ENV", "prod") == "local"
 
 
-# ─────────────────────────────────────────
-# SECRETS
-# ─────────────────────────────────────────
 
-def get_secret(
-    key: str,
-    required: bool = True
-) -> str | None:
+def get_secret(key: str,required: bool = True) -> str | None:
     """
     Obtiene un valor de configuración dependiendo
     del entorno de ejecución.
-
-    Local:
-        Obtiene el valor desde las variables de entorno
-        o desde el fichero .env.
-
-    Databricks:
-        Obtiene el valor desde Databricks Secrets.
-
-    Args:
-        key:
-            Nombre de la variable de entorno.
-
-        required:
-            Si es True, lanza un error cuando no existe
-            el valor.
-
-    Returns:
-        Valor de configuración o None si no es obligatorio.
     """
     try:
         from dotenv import load_dotenv
@@ -60,45 +30,26 @@ def get_secret(
     except ImportError:
         logger.info("python-dotenv no disponible; usando configuración de Databricks")
 
-
     if is_local():
-
         value = os.getenv(key)
-
         if value:
-            logger.info(
-                "Configuración local cargada correctamente."
-            )
-
+            logger.info("Configuración local cargada correctamente.")
     else:
-        
         try:
             from pyspark.dbutils import DBUtils
             from pyspark.sql import SparkSession
 
             spark = SparkSession.builder.getOrCreate()
             dbutils = DBUtils(spark)
-            value = dbutils.secrets.get(
-                scope="ad-pipeline",
-                key=key
-            )
+            value = dbutils.secrets.get(scope="ad-pipeline",key=key)
 
-            logger.info(
-                "Configuración cargada desde "
-                "Databricks Secrets."
-            )
+            logger.info("Configuración cargada desde Databricks Secrets")
 
         except Exception as exc:
-            raise RuntimeError(
-                f"No se pudo obtener el secreto '{key}' "
-                f"del scope 'ad-pipeline': {exc}"
-            ) from exc
+            raise RuntimeError(f"No se pudo obtener el secreto '{key}' del scope 'ad-pipeline': {exc}") from exc
 
     if required and not value:
-        raise ValueError(
-            f"Configuración requerida no encontrada: "
-            f"{key}"
-        )
+        raise ValueError(f"Configuración requerida no encontrada: {key}")
 
     return value
 

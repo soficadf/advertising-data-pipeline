@@ -4,27 +4,19 @@ import logging
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import col, sum, min, round, coalesce, lit, when, datediff
 
-from config.settings import get_spark_session
+from config.settings import get_secret, get_spark_session
 from config.adls_client import get_adls_base_path, configure_spark_adls
+from model import Layers,DatasetsSilver,DatasetsGold
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def read_silver_tables(spark, base_path: str) -> tuple:
-    """Lee las tablas Silver necesarias para generar Gold."""
-    df_ventas = spark.read.format("delta").load(f"{base_path}/silver/ventas_diarias/")
-    df_spend = spark.read.format("delta").load(f"{base_path}/silver/ad_spend/")
-    df_meta = spark.read.format("delta").load(f"{base_path}/silver/meta_ads/")
-    return df_ventas, df_spend, df_meta
-
 
 def transform_demographic_reach(df_spend: DataFrame, df_meta: DataFrame) -> DataFrame:
     """
     Genera Gold Demographic Reach.
-    Pregunta: ¿A quién está llegando cada anuncio?
-    Granularidad: día + anuncio + país + edad + género
     """
     df_ads = df_spend.select("ad_id", "product_id", "product_name").dropDuplicates(["ad_id"])
     df = df_meta.join(df_ads, on="ad_id", how="left")
@@ -48,7 +40,6 @@ def transform_demographic_reach(df_spend: DataFrame, df_meta: DataFrame) -> Data
 def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_meta: DataFrame) -> DataFrame:
     """
     Genera Gold Ad Daily Metrics.
-    Pregunta: ¿Cuánto rinde cada anuncio? ¿Cuándo se ve el efecto en ventas?
     """
     df_spend_daily = df_spend.groupBy("fecha", "ad_id", "product_id", "product_name") \
         .agg(round(sum("daily_spend"), 2).alias("gasto"))
@@ -100,7 +91,6 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
 def transform_saturation_curve(df_ad_daily_metrics: DataFrame) -> DataFrame:
     """
     Genera Gold Saturation Curve.
-    Pregunta: ¿Cuál es el presupuesto óptimo?
     """
     return df_ad_daily_metrics.groupBy("fecha") \
         .agg(
@@ -124,6 +114,7 @@ def transform_saturation_curve(df_ad_daily_metrics: DataFrame) -> DataFrame:
 
 def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str):
     """Escribe una tabla Gold directamente en Unity Catalog."""
+
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
     df.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
         .saveAsTable(f"{catalog}.{schema}.{table}")
@@ -135,12 +126,14 @@ def main():
     base_path = get_adls_base_path()
     configure_spark_adls(spark)
 
-    catalog = "masterscf002dbr"
-    schema = "ad_pipeline"
+    catalog = get_secret("UNITY_CATALOG")
+    schema =get_secret("UNITY_SCHEMA")
 
     logger.info("Iniciando proceso silver → gold")
 
-    df_ventas, df_spend, df_meta = read_silver_tables(spark, base_path)
+    df_ventas = spark.read.format("delta").load(f"{base_path}/{Layers.SILVER.value}/{DatasetsSilver.VENTAS.value}/")
+    df_spend = spark.read.format("delta").load(f"{base_path}/{Layers.SILVER.value}/{DatasetsSilver.SPEND.value}/")
+    df_meta = spark.read.format("delta").load(f"{base_path}/{Layers.SILVER.value}/{DatasetsSilver.META.value}/")
 
     logger.info("Procesando Gold Demographic Reach...")
     write_gold(
@@ -148,7 +141,7 @@ def main():
         spark,
         catalog,
         schema,
-        "gold_demographic_reach"
+        DatasetsGold.REACH.value
     )
 
     logger.info("Procesando Gold Ad Daily Metrics...")
@@ -158,7 +151,7 @@ def main():
         spark,
         catalog,
         schema,
-        "gold_ad_daily_metrics"
+         DatasetsGold.DAILY_METRICS.value
     )
 
     logger.info("Procesando Gold Saturation Curve...")
@@ -167,7 +160,7 @@ def main():
         spark,
         catalog,
         schema,
-        "gold_saturation_curve"
+        DatasetsGold.SATURATION.value
     )
 
     logger.info("Proceso silver → gold completado")
