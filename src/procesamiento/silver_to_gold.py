@@ -155,9 +155,9 @@ def transform_saturation_curve(df_ad_daily_metrics: DataFrame) -> DataFrame:
 def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str):
     """Escribe una tabla Gold directamente en Unity Catalog."""
 
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
     df.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
-        .saveAsTable(f"{catalog}.{schema}.{table}")
+        .saveAsTable(f"`{catalog}`.`{schema}`.`{table}`")
     logger.info(f"Tabla {table} escrita: {df.count()} registros")
 
 
@@ -166,8 +166,11 @@ def main():
     base_path = get_adls_base_path()
     configure_spark_adls(spark)
 
-    catalog = DatasetsGold.CATALOG.value
-    schema =DatasetsGold.SCHEMA.value
+    #catalog = DatasetsGold.CATALOG.value
+    #schema =DatasetsGold.SCHEMA.value
+
+    catalog=get_secret("UNITY_CATALOG")
+    schema=get_secret("UNITY_SCHEMA")
 
     logger.info("Iniciando proceso silver → gold")
 
