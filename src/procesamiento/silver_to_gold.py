@@ -158,7 +158,7 @@ def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str):
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
     df.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
         .saveAsTable(f"{catalog}.{schema}.{table}")
-    logger.info(f"Tabla {catalog}.{schema}.{table} escrita: {df.count()} registros")
+    logger.info(f"Tabla {table} escrita: {df.count()} registros")
 
 
 def main():

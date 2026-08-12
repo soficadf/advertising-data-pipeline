@@ -21,7 +21,7 @@ def get_adls_client(account_name=None,account_key=None) -> DataLakeServiceClient
 
 
 def upload_to_adls(content, layer, folder, filename,
-                   container=None, target_date=None, acount_name=None, account_key=None):
+                   container=None, target_date=None, account_name=None, account_key=None):
     """
     Sube un fichero al Data Lake.
     """
@@ -29,7 +29,7 @@ def upload_to_adls(content, layer, folder, filename,
     if container is None:
         container = get_secret(key="ADLS_CONTAINER_NAME")
 
-    client = get_adls_client(acount_name,account_key)
+    client = get_adls_client(account_name,account_key)
     date = (
         target_date
         if target_date is not None
