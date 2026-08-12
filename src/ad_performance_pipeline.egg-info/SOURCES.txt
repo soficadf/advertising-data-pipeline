@@ -12,6 +12,7 @@ src/ingesta/meta_extractor.py
 src/ingesta/streaming_consumer.py
 src/procesamiento/bronze_to_silver.py
 src/procesamiento/landing_to_bronze.py
+src/procesamiento/model.py
 src/procesamiento/silver_to_gold.py
 src/schemas/__init__.py
 src/schemas/meta.py
