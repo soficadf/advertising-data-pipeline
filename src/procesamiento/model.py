@@ -24,6 +24,7 @@ class DatasetsGold(enum):
     REACH="gold_demographic_reach"
     DAILY_METRICS="gold_ad_daily_metrics"
     SATURATION="gold_saturation_curve"
+    TOTAL_METRICS="gold_ad_total_metrics"
 
 class TablesSQl(enum):
     SPEND="daily_spend"

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import json
 from config.adls_client import get_adls_client
+from procesamiento.model import DatasetsLanding, Layers
 
 load_dotenv()
 
@@ -81,44 +82,77 @@ def insert_products(conn):
 
 
 def insert_ad_product_mapping(conn, ad_ids: list):
-    """Asigna cada anuncio a un producto de forma sintética."""
+    """Asigna cada anuncio a un producto."""
+
     cursor = conn.cursor()
     products = load_products()
     product_ids = [p["id"] for p in products]
-    
-    for ad_id in ad_ids:
-        product_id = random.choice(product_ids)
-        cursor.execute("""
-            IF NOT EXISTS (SELECT * FROM ad_product_mapping WHERE ad_id = ?)
-            INSERT INTO ad_product_mapping (ad_id, product_id)
+    random.shuffle(ad_ids)
+
+    for i, ad_id in enumerate(ad_ids):
+        product_id = product_ids[i % len(product_ids)]
+        cursor.execute(
+            """
+            IF NOT EXISTS (
+                SELECT 1
+                FROM ad_product_mapping
+                WHERE ad_id = ?
+            )
+            INSERT INTO ad_product_mapping
+                (ad_id, product_id)
             VALUES (?, ?)
-        """, ad_id, ad_id, product_id)
-    
+            """,
+            ad_id,
+            product_id
+        )
+
     conn.commit()
     logger.info(f"{len(ad_ids)} anuncios mapeados a productos")
 
 
-def insert_daily_spend(conn, ad_ids: list, days: int = 30):
-    """Genera gasto publicitario diario sintético por anuncio."""
+def insert_daily_spend(
+    conn,
+    ad_ids: list,
+    days: int = 30
+):
+    """Genera gasto diario desde la fecha de inicio de cada anuncio."""
+
     cursor = conn.cursor()
+
     today = datetime.now(timezone.utc).date()
+    first_date = today - timedelta(days=days - 1)
+
     total = 0
 
     for ad_id in ad_ids:
-        # Cada anuncio tiene un presupuesto diario base distinto
-        base_spend = random.uniform(20, 200)
-        
-        for i in range(days):
-            date = today - timedelta(days=i)
-            # Variación diaria del +/- 20% sobre el base
-            daily = round(base_spend * random.uniform(0.8, 1.2), 2)
-            
-            cursor.execute("""
-                IF NOT EXISTS (SELECT * FROM daily_spend WHERE ad_id = ? AND date = ?)
-                INSERT INTO daily_spend (ad_id, date, daily_spend)
+
+        # Cada anuncio comienza en un momento diferente.
+        start_offset = random.randint(0, days - 7)
+        start_date = first_date + timedelta(days=start_offset)
+
+        base_spend = random.uniform(15, 80)
+        current_date = start_date
+        while current_date <= today:
+            daily = round(base_spend * random.uniform(0.75, 1.25),2)
+            cursor.execute(
+                """
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM daily_spend
+                    WHERE ad_id = ?
+                    AND date = ?
+                )
+                INSERT INTO daily_spend
+                    (ad_id, date, daily_spend)
                 VALUES (?, ?, ?)
-            """, ad_id, date, ad_id, date, daily)
+                """,
+                ad_id,
+                current_date,
+                daily
+            )
+
             total += 1
+            current_date += timedelta(days=1)
 
     conn.commit()
     logger.info(f"{total} registros de gasto diario insertados")
@@ -136,22 +170,18 @@ if __name__ == "__main__":
     account_name = os.getenv("ADLS_ACCOUNT_NAME")
     container = os.getenv("ADLS_CONTAINER_NAME")
     
-    # Lee el último fichero de Meta desde landing en ADLS Gen2
     client = get_adls_client()
     filesystem = client.get_file_system_client(container)
     
-    # Lista los ficheros en landing/meta_ads/
-    paths = list(filesystem.get_paths(path="landing/meta_ads", recursive=True))
+    paths = list(filesystem.get_paths(path=f"{Layers.LANDING.value}/{DatasetsLanding.META.value}", recursive=True))
     json_files = [p.name for p in paths if p.name.endswith(".json")]
     
     if not json_files:
-        raise FileNotFoundError("No se encontró ningún fichero de Meta en landing/meta_ads/")
+        raise FileNotFoundError("No se encontró ningún fichero de Meta en landing")
     
-    # Coge el más reciente
     latest_file = sorted(json_files)[-1]
     logger.info(f"Usando fichero: {latest_file}")
     
-    # Lee el contenido
     file_client = filesystem.get_file_client(latest_file)
     content = file_client.download_file().readall()
     data = json.loads(content)
