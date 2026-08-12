@@ -103,6 +103,7 @@ def insert_ad_product_mapping(conn, ad_ids: list):
             VALUES (?, ?)
             """,
             ad_id,
+            ad_id,
             product_id
         )
 
@@ -146,6 +147,8 @@ def insert_daily_spend(
                     (ad_id, date, daily_spend)
                 VALUES (?, ?, ?)
                 """,
+                ad_id,
+                current_date,
                 ad_id,
                 current_date,
                 daily

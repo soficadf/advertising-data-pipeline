@@ -104,9 +104,8 @@ def get_eventhubs_kafka_config(connection_string: str, eventhub_name: str) -> di
     }
 
 
-def make_write_batch(container: str, account_name:str,account_key:str):
+def make_write_batch(container: str, account_name:str,account_key:str,layer:str,source:str):
     """Returns a foreachBatch function with pre-resolved ADLS credentials."""
-
     def write_batch(df_batch, batch_id):
         if df_batch.isEmpty():
             logger.info("Batch %s vacío, nada que escribir.", batch_id)
@@ -124,7 +123,7 @@ def make_write_batch(container: str, account_name:str,account_key:str):
         }, ensure_ascii=False, indent=2, default=str)
 
         upload_to_adls(
-            content=content,  layer=Layers.LANDING.value, folder=DatasetsLanding.VENTAS.value, filename=filename,
+            content=content,  layer=layer, folder=source, filename=filename,
             container=container, account_key=account_key,account_name=account_name
         )
         logger.info("Batch %s: %s eventos escritos en landing/ventas/", batch_id, len(events))
@@ -161,9 +160,9 @@ def start_consumer_spark(connection_string, eventhub_name, base_path,
         "enqueued_time"
     )
 
-    checkpoint_path = f"{base_path}/checkpoints/ventas_streaming"
+    checkpoint_path = f"{base_path}/checkpoints/{DatasetsLanding.VENTAS.value}_streaming"
     query = df_parsed.writeStream \
-        .foreachBatch(make_write_batch(container,account_name,account_key)) \
+        .foreachBatch(make_write_batch(container,account_name,account_key, Layers.LANDING.value,DatasetsLanding.VENTAS.value)) \
         .option("checkpointLocation", checkpoint_path) \
         .trigger(processingTime="1 minute") \
         .start()
