@@ -41,23 +41,20 @@ def transform_demographic_reach(df_spend: DataFrame, df_meta: DataFrame) -> Data
 def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_meta: DataFrame) -> DataFrame:
     """Genera Gold Ad Daily Metrics."""
 
-    # Fecha de publicación de cada anuncio
     df_ad_start = (
         df_meta.groupBy("ad_id", "product_id", "product_name")
         .agg(min("ad_delivery_start_time").alias("fecha_inicio_anuncio"))
     )
 
-    # Fechas disponibles
     df_dates = df_meta.select("fecha").distinct()
 
-    # Todos los anuncios activos en cada fecha
     df_active_ads = (
         df_dates.crossJoin(df_ad_start)
         .filter(col("fecha") >= col("fecha_inicio_anuncio"))
     )
 
-    # Alcance diario a partir del acumulado
     window = Window.partitionBy("ad_id").orderBy("fecha")
+
     df_reach_daily = (
         df_meta.groupBy("fecha", "ad_id")
         .agg(sum("reach").alias("alcance_acumulado"))
@@ -70,13 +67,11 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
         .select("fecha", "ad_id", "alcance")
     )
 
-    # Gasto diario por anuncio
     df_spend_daily = (
         df_spend.groupBy("fecha", "ad_id")
         .agg(round(sum("daily_spend"), 2).alias("gasto"))
     )
 
-    # Ventas diarias por producto
     df_sales_daily = (
         df_ventas.groupBy("fecha", "product_id", "product_name")
         .agg(
@@ -85,9 +80,9 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
         )
     )
 
-    # Las ventas del producto se asocian a todos sus anuncios activos
     df_sales_by_ad = (
-        df_active_ads.join(
+        df_active_ads
+        .join(
             df_sales_daily,
             on=["fecha", "product_id", "product_name"],
             how="left"
@@ -108,16 +103,19 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
         )
         .withColumn(
             "roas",
-            when(col("gasto") > 0, round(col("ventas_importe") / col("gasto"), 2)).otherwise(lit(0))
+            when(
+                col("gasto") > 0,
+                round(col("ventas_importe") / col("gasto"), 2)
+            ).otherwise(lit(0))
         )
         .withColumn(
             "dias_desde_inicio",
             datediff(col("fecha"), col("fecha_inicio_anuncio"))
         )
         .select(
-            "fecha", "ad_id", "product_id", "product_name", "gasto",
-            "alcance", "ventas_unidades", "ventas_importe", "roas",
-            "dias_desde_inicio"
+            "fecha", "ad_id", "product_id", "product_name",
+            "gasto", "alcance", "ventas_unidades",
+            "ventas_importe", "roas", "dias_desde_inicio"
         )
         .orderBy("fecha", "ad_id")
     )
@@ -148,28 +146,65 @@ def transform_ad_total_metrics(df_ad_daily_metrics: DataFrame) -> DataFrame:
         ) \
         .orderBy("ad_id")
 
-def transform_saturation_curve(df_ad_daily_metrics: DataFrame) -> DataFrame:
+def transform_saturation_curve(df_ventas: DataFrame,df_spend: DataFrame) -> DataFrame:
     """
     Genera Gold Saturation Curve.
     """
-    return df_ad_daily_metrics.groupBy("fecha") \
+
+    df_spend_daily = (
+        df_spend
+        .groupBy("fecha")
         .agg(
-            round(sum("gasto"), 2).alias("gasto_total_dia"),
+            round(sum("gasto"), 2).alias("gasto_total_dia")
+        )
+    )
+
+    df_sales_daily = (
+        df_ventas
+        .groupBy("fecha", "product_id")
+        .agg(
             sum("ventas_unidades").alias("ventas_unidades_total_dia"),
             round(sum("ventas_importe"), 2).alias("ventas_total_dia")
-        ) \
+        )
+    )
+
+    df_sales_total = (
+        df_sales_daily
+        .groupBy("fecha")
+        .agg(
+            sum("ventas_unidades_total_dia").alias("ventas_unidades_total_dia"),
+            round(sum("ventas_total_dia"), 2).alias("ventas_total_dia")
+        )
+    )
+
+    return (
+        df_spend_daily
+        .join(df_sales_total, on="fecha", how="left")
+        .select(
+            "fecha",
+            "gasto_total_dia",
+            coalesce(
+                col("ventas_unidades_total_dia"),
+                lit(0)
+            ).alias("ventas_unidades_total_dia"),
+            coalesce(
+                col("ventas_total_dia"),
+                lit(0)
+            ).alias("ventas_total_dia")
+        )
         .withColumn(
             "roas_global",
             when(
                 col("gasto_total_dia") > 0,
-                round(col("ventas_total_dia") / col("gasto_total_dia"), 2)
+                round(
+                    col("ventas_total_dia") /
+                    col("gasto_total_dia"),
+                    2
+                )
             ).otherwise(lit(0))
-        ) \
-        .select(
-            "fecha", "gasto_total_dia", "ventas_unidades_total_dia",
-            "ventas_total_dia", "roas_global"
-        ) \
+        )
         .orderBy("fecha")
+    )
 
 
 def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str):
@@ -225,7 +260,8 @@ def main():
 
     logger.info("Procesando Gold Saturation Curve...")
     write_gold(
-        transform_saturation_curve(df_ad_daily),
+        transform_saturation_curve( df_ventas,
+        df_spend),
         spark,
         catalog,
         schema,
