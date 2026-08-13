@@ -84,7 +84,7 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
         df_active_ads
         .join(
             df_sales_daily,
-            on=["fecha", "product_id", "product_name"],
+            on=["fecha", "ad_id"],
             how="left"
         )
     )
