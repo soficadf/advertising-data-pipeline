@@ -158,7 +158,7 @@ def transform_saturation_curve(df_ventas: DataFrame,df_spend: DataFrame) -> Data
         df_spend
         .groupBy("fecha")
         .agg(
-            round(sum("gasto"), 2).alias("gasto_total_dia")
+            round(sum("daily_spend"), 2).alias("gasto_total_dia")
         )
     )
 
