@@ -42,7 +42,7 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
     """Genera Gold Ad Daily Metrics."""
 
     df_ad_start = (
-        df_meta.groupBy("ad_id", "product_id", "product_name")
+        df_meta.groupBy("ad_id")
         .agg(min("ad_delivery_start_time").alias("fecha_inicio_anuncio"))
     )
 
