@@ -10,7 +10,11 @@ from pyspark.sql.functions import (
     from_json,
     regexp_extract,
     to_date,
-    to_timestamp
+    to_timestamp,
+    year,
+    month,
+    dayofmonth
+
 )
 from pyspark.sql.types import StructType
 from pyspark.sql import SparkSession
@@ -113,6 +117,12 @@ def write_to_bronze(df_bronze: DataFrame,base_path: str,source: str) -> None:
 
     output_path = (f"{base_path}/{Layers.BRONZE.value}/{source}/")
     checkpoint_path = (f"{base_path}/checkpoints/{source}_{Layers.BRONZE.value}")
+    df_bronze = (
+        df_bronze
+        .withColumn("anio", year("fecha"))
+        .withColumn("mes", month("fecha"))
+        .withColumn("dia", dayofmonth("fecha"))
+    )
 
     logger.info("Escribiendo Bronze para '%s' en %s",source,output_path)
 
@@ -122,7 +132,7 @@ def write_to_bronze(df_bronze: DataFrame,base_path: str,source: str) -> None:
         .format("delta")
         .outputMode("append")
         .option("checkpointLocation",checkpoint_path)
-        .partitionBy("fecha")
+        .partitionBy("anio", "mes", "dia")
         .trigger(availableNow=True)
         .start(output_path)
     )

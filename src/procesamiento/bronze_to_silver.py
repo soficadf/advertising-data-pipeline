@@ -2,7 +2,7 @@ import logging
 
 from config.adls_client import configure_spark_adls, get_adls_base_path
 from pyspark.sql import DataFrame
-from pyspark.sql.functions import  sum, round, col, explode,coalesce,lit
+from pyspark.sql.functions import  sum, round, col, explode,coalesce,lit,year, month, dayofmonth
 
 from config.settings import get_secret, get_spark_session
 from model import DatasetsSilver, Layers,DatasetsBronze, TablesSQl
@@ -101,7 +101,14 @@ def transform_meta(spark, base_path: str) -> DataFrame:
 
 
 def write_to_silver(df: DataFrame, base_path: str, name:str):
-    df.write.format("delta").mode("overwrite").partitionBy("fecha") \
+    df = (
+        df
+        .withColumn("anio", year("fecha"))
+        .withColumn("mes", month("fecha"))
+        .withColumn("dia", dayofmonth("fecha"))
+    )
+
+    df.write.format("delta").mode("overwrite").partitionBy("anio", "mes", "dia") \
         .save(f"{base_path}/silver/{name}/")
 
     logger.info(f"Silver {name} escrito: {df.count()} registros")

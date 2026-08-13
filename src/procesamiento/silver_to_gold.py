@@ -220,8 +220,10 @@ def transform_saturation_curve(df_ventas: DataFrame,df_spend: DataFrame) -> Data
     )
 
 
-def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str):
+def write_gold(df: DataFrame, spark, catalog: str, schema: str, table: str, base_path:str):
     """Escribe una tabla Gold directamente en Unity Catalog."""
+    output_path = f"{base_path}/{Layers.GOLD.value}/{table}/"
+    df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(output_path)
 
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
     df.write.format("delta").mode("overwrite").option("overwriteSchema", "true") \
@@ -249,7 +251,8 @@ def main():
         spark,
         catalog,
         schema,
-        DatasetsGold.REACH.value
+        DatasetsGold.REACH.value,
+        base_path
     )
 
     logger.info("Procesando Gold Ad Daily Metrics...")
@@ -259,7 +262,8 @@ def main():
         spark,
         catalog,
         schema,
-         DatasetsGold.DAILY_METRICS.value
+         DatasetsGold.DAILY_METRICS.value,
+         base_path
     )
 
     logger.info("Procesando Gold Ad Total Metrics...")
@@ -268,7 +272,8 @@ def main():
         spark,
         catalog,
         schema,
-        DatasetsGold.TOTAL_METRICS.value
+        DatasetsGold.TOTAL_METRICS.value,
+        base_path
     )
 
     logger.info("Procesando Gold Saturation Curve...")
@@ -278,7 +283,8 @@ def main():
         spark,
         catalog,
         schema,
-        DatasetsGold.SATURATION.value
+        DatasetsGold.SATURATION.value,
+        base_path
     )
 
     logger.info("Proceso silver → gold completado")
