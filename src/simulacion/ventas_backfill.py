@@ -45,8 +45,8 @@ def run_backfill(days: int = 30):
 
         upload_to_adls(
             content=content,
-            layer={Layers.LANDING.value},
-            folder={DatasetsLanding.VENTAS.value},
+            layer=Layers.LANDING.value,
+            folder=DatasetsLanding.VENTAS.value,
             filename=filename,
             target_date=target_date
         )
