@@ -39,68 +39,88 @@ def transform_demographic_reach(df_spend: DataFrame, df_meta: DataFrame) -> Data
 
 
 def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_meta: DataFrame) -> DataFrame:
-    """
-    Genera Gold Ad Daily Metrics.
-    """
-    df_spend_daily = df_spend.groupBy("fecha", "ad_id", "product_id", "product_name") \
-        .agg(round(sum("daily_spend"), 2).alias("gasto"))
+    """Genera Gold Ad Daily Metrics."""
 
+    # Fecha de publicación de cada anuncio
+    df_ad_start = (
+        df_meta.groupBy("ad_id", "product_id", "product_name")
+        .agg(min("ad_delivery_start_time").alias("fecha_inicio_anuncio"))
+    )
+
+    # Fechas disponibles
+    df_dates = df_meta.select("fecha").distinct()
+
+    # Todos los anuncios activos en cada fecha
+    df_active_ads = (
+        df_dates.crossJoin(df_ad_start)
+        .filter(col("fecha") >= col("fecha_inicio_anuncio"))
+    )
+
+    # Alcance diario a partir del acumulado
     window = Window.partitionBy("ad_id").orderBy("fecha")
     df_reach_daily = (
-            df_meta.groupBy("fecha", "ad_id")
-            .agg(sum("reach").alias("alcance_acumulado"))
-            .withColumn("alcance_anterior", lag("alcance_acumulado").over(window))
-            .withColumn(
-                "alcance",
-                when(
-                    col("alcance_anterior").isNull(),
-                    col("alcance_acumulado")
-                ).otherwise(
-                    greatest(col("alcance_acumulado") - col("alcance_anterior"), lit(0))
-                )
-            )
-            .select("fecha", "ad_id", "alcance")
+        df_meta.groupBy("fecha", "ad_id")
+        .agg(sum("reach").alias("alcance_acumulado"))
+        .withColumn("alcance_anterior", lag("alcance_acumulado").over(window))
+        .withColumn(
+            "alcance",
+            when(col("alcance_anterior").isNull(), col("alcance_acumulado"))
+            .otherwise(greatest(col("alcance_acumulado") - col("alcance_anterior"), lit(0)))
         )
+        .select("fecha", "ad_id", "alcance")
+    )
 
-    df_ad_start = df_meta.groupBy("ad_id") \
-        .agg(min("ad_delivery_start_time").alias("fecha_inicio_anuncio"))
+    # Gasto diario por anuncio
+    df_spend_daily = (
+        df_spend.groupBy("fecha", "ad_id")
+        .agg(round(sum("daily_spend"), 2).alias("gasto"))
+    )
 
-    df_sales_daily = df_ventas.groupBy("fecha", "product_id", "product_name") \
+    # Ventas diarias por producto
+    df_sales_daily = (
+        df_ventas.groupBy("fecha", "product_id", "product_name")
         .agg(
             sum("ventas_unidades").alias("ventas_unidades"),
             round(sum("ventas_importe"), 2).alias("ventas_importe")
         )
+    )
 
-    return df_spend_daily \
-        .join(df_reach_daily, on=["fecha", "ad_id"], how="left") \
-        .join(df_ad_start, on="ad_id", how="left") \
-        .join(df_sales_daily, on=["fecha", "product_id", "product_name"], how="left") \
+    # Las ventas del producto se asocian a todos sus anuncios activos
+    df_sales_by_ad = (
+        df_active_ads.join(
+            df_sales_daily,
+            on=["fecha", "product_id", "product_name"],
+            how="left"
+        )
+    )
+
+    return (
+        df_sales_by_ad
+        .join(df_reach_daily, on=["fecha", "ad_id"], how="left")
+        .join(df_spend_daily, on=["fecha", "ad_id"], how="left")
         .select(
-            col("fecha"), col("ad_id"),col( "product_id"), col("product_name"), col("gasto"),
+            "fecha", "ad_id", "product_id", "product_name",
+            coalesce(col("gasto"), lit(0)).alias("gasto"),
             coalesce(col("alcance"), lit(0)).alias("alcance"),
             coalesce(col("ventas_unidades"), lit(0)).alias("ventas_unidades"),
             coalesce(col("ventas_importe"), lit(0)).alias("ventas_importe"),
-            col("fecha_inicio_anuncio")
-        ) \
+            "fecha_inicio_anuncio"
+        )
         .withColumn(
             "roas",
-            when(
-                col("gasto") > 0,
-                round(col("ventas_importe") / col("gasto"), 2)
-            ).otherwise(lit(0))
-        ) \
+            when(col("gasto") > 0, round(col("ventas_importe") / col("gasto"), 2)).otherwise(lit(0))
+        )
         .withColumn(
             "dias_desde_inicio",
-            when(
-                col("fecha_inicio_anuncio").isNotNull(),
-                datediff(col("fecha"), col("fecha_inicio_anuncio"))
-            )
-        ) \
+            datediff(col("fecha"), col("fecha_inicio_anuncio"))
+        )
         .select(
-            "fecha", "ad_id","product_id", "product_name", "gasto", "alcance",
-            "ventas_unidades", "ventas_importe", "roas", "dias_desde_inicio"
-        ) \
+            "fecha", "ad_id", "product_id", "product_name", "gasto",
+            "alcance", "ventas_unidades", "ventas_importe", "roas",
+            "dias_desde_inicio"
+        )
         .orderBy("fecha", "ad_id")
+    )
 
 def transform_ad_total_metrics(df_ad_daily_metrics: DataFrame) -> DataFrame:
     """
