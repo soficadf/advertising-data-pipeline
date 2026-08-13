@@ -68,7 +68,7 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
     )
 
     df_spend_daily = (
-        df_spend.groupBy("fecha", "ad_id")
+        df_spend.groupBy("fecha", "ad_id", "product_id","product_name")
         .agg(round(sum("daily_spend"), 2).alias("gasto"))
     )
 
@@ -79,12 +79,16 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
             round(sum("ventas_importe"), 2).alias("ventas_importe")
         )
     )
+    df_sales_spend=(
+        df_spend_daily.join(df_sales_daily, on=["fecha","product_id", "product_name" ],
+        how="left")
+    )
 
     df_sales_by_ad = (
         df_active_ads
         .join(
-            df_sales_daily,
-            on=["fecha", "ad_id"],
+            df_sales_spend,
+            on=["fecha", "ad_id", "product_id", "product_name"],
             how="left"
         )
     )
@@ -92,7 +96,6 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
     return (
         df_sales_by_ad
         .join(df_reach_daily, on=["fecha", "ad_id"], how="left")
-        .join(df_spend_daily, on=["fecha", "ad_id"], how="left")
         .select(
             "fecha", "ad_id", "product_id", "product_name",
             coalesce(col("gasto"), lit(0)).alias("gasto"),
