@@ -27,8 +27,6 @@ class DatasetsGold(Enum):
     DAILY_METRICS="gold_ad_daily_metrics"
     SATURATION="gold_saturation_curve"
     TOTAL_METRICS="gold_ad_total_metrics"
-    CATALOG = "masterscf002dbr"
-    SCHEMA="ad-pipeline"
 
 class TablesSQl(Enum):
     SPEND="daily_spend"

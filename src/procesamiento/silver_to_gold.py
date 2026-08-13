@@ -166,11 +166,8 @@ def main():
     base_path = get_adls_base_path()
     configure_spark_adls(spark)
 
-    #catalog = DatasetsGold.CATALOG.value
-    schema =DatasetsGold.SCHEMA.value
-
     catalog=get_secret("UNITY_CATALOG")
-    #schema=get_secret("UNITY_SCHEMA")
+    schema=get_secret("UNITY_SCHEMA")
 
     logger.info("Iniciando proceso silver → gold")
 
