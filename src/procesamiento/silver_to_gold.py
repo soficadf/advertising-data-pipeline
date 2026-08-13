@@ -41,18 +41,27 @@ def transform_demographic_reach(df_spend: DataFrame, df_meta: DataFrame) -> Data
 def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_meta: DataFrame) -> DataFrame:
     """Genera Gold Ad Daily Metrics."""
 
+    df_dates = df_meta.select("fecha").distinct()
+
+
+    df_ad_product = (
+    df_spend
+    .select("ad_id", "product_id", "product_name")
+    .dropDuplicates(["ad_id"])
+    )
+
     df_ad_start = (
-        df_meta.groupBy("ad_id")
+        df_meta
+        .groupBy("ad_id")
         .agg(min("ad_delivery_start_time").alias("fecha_inicio_anuncio"))
     )
 
-    df_dates = df_meta.select("fecha").distinct()
-
     df_active_ads = (
-        df_dates.crossJoin(df_ad_start)
+        df_dates
+        .crossJoin(df_ad_start)
+        .join(df_ad_product, on="ad_id", how="left")
         .filter(col("fecha") >= col("fecha_inicio_anuncio"))
     )
-
     window = Window.partitionBy("ad_id").orderBy("fecha")
 
     df_reach_daily = (
@@ -79,19 +88,20 @@ def transform_ad_daily_metrics(df_ventas: DataFrame, df_spend: DataFrame, df_met
             round(sum("ventas_importe"), 2).alias("ventas_importe")
         )
     )
-    df_sales_spend=(
-        df_spend_daily.join(df_sales_daily, on=["fecha","product_id", "product_name" ],
-        how="left")
-    )
 
     df_sales_by_ad = (
-        df_active_ads
-        .join(
-            df_sales_spend,
-            on=["fecha", "ad_id"],
-            how="left"
-        )
+    df_active_ads
+    .join(
+        df_sales_daily,
+        on=["fecha", "product_id", "product_name"],
+        how="left"
     )
+    .join(
+        df_spend_daily,
+        on=["fecha", "ad_id", "product_id", "product_name"],
+        how="left"
+    )
+)
 
     return (
         df_sales_by_ad
