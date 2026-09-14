@@ -1,34 +1,35 @@
-from simulacion.ventas_simulator import generate_sale_event
+import json
+from simulacion.ventas_utils import load_products, get_product_weights, generate_sale_event
 
+def get_test_products():
+    products, weights = get_product_weights.__wrapped__() if hasattr(get_product_weights, '__wrapped__') else (load_products(), [1] * 5)
+    return products, weights
 
 def test_generate_sale_event_structure():
-    """Verifica que el evento generado tiene todos los campos esperados."""
-    event = generate_sale_event()
-    
-    required_fields = [
-        "event_id", "timestamp", "product_id", "product_name",
-        "quantity", "unit_price", "total_amount", "region", "channel"
-    ]
-    
+    products = load_products()
+    weights = [1] * len(products)
+    event = generate_sale_event(products, weights)
+    required_fields = ["event_id", "timestamp", "product_id", "product_name",
+                       "quantity", "unit_price", "total_amount", "region", "channel"]
     for field in required_fields:
-        assert field in event, f"Campo {field} no encontrado en el evento"
-
+        assert field in event
 
 def test_generate_sale_event_total_amount():
-    """Verifica que el total_amount es consistente con quantity y unit_price."""
-    event = generate_sale_event()
+    products = load_products()
+    weights = [1] * len(products)
+    event = generate_sale_event(products, weights)
     expected = round(event["unit_price"] * event["quantity"], 2)
     assert event["total_amount"] == expected
 
-
 def test_generate_sale_event_quantity_range():
-    """Verifica que la cantidad está dentro del rango esperado."""
+    products = load_products()
+    weights = [1] * len(products)
     for _ in range(20):
-        event = generate_sale_event()
+        event = generate_sale_event(products, weights)
         assert 1 <= event["quantity"] <= 3
 
-
 def test_generate_sale_event_channel():
-    """Verifica que el canal es siempre ecommerce."""
-    event = generate_sale_event()
+    products = load_products()
+    weights = [1] * len(products)
+    event = generate_sale_event(products, weights)
     assert event["channel"] == "ecommerce"

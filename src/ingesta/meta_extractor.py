@@ -47,6 +47,8 @@ def fetch_ads(search_terms: str,country: str = "ES") -> list:
     """
 
     token = get_secret(key="META_ACCESS_TOKEN")
+    if not token:
+        raise ValueError("META_ACCESS_TOKEN no configurado")
 
     params = {
         "search_terms": search_terms,
